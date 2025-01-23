@@ -8,12 +8,12 @@
         state: directory
         mode: '0755'
       with_items:
-        - /opt/rabbitmq/data
-        - /opt/rabbitmq/config
+        - /home/ubuntu/rabbitmq/data
+        - /home/ubuntu/rabbitmq/config
 
     - name: Create RabbitMQ deployment yaml
       copy:
-        dest: /opt/rabbitmq/rabbitmq-deployment.yml
+        dest: /home/ubuntu/rabbitmq/rabbitmq-deployment.yml
         content: |
           apiVersion: apps/v1
           kind: Deployment
@@ -49,10 +49,10 @@
                 volumes:
                 - name: rabbitmq-data
                   hostPath:
-                    path: /opt/rabbitmq/data
+                    path: /home/ubuntu/rabbitmq/data
                 - name: rabbitmq-config
                   hostPath:
-                    path: /opt/rabbitmq/config
+                    path: /home/ubuntu/rabbitmq/config
           ---
           apiVersion: v1
           kind: Service
@@ -74,7 +74,7 @@
               app: rabbitmq
 
     - name: Deploy RabbitMQ to K3s
-      command: kubectl apply -f /opt/rabbitmq/rabbitmq-deployment.yml
+      command: kubectl apply -f /home/ubuntu/rabbitmq/rabbitmq-deployment.yml
 
     - name: Wait for RabbitMQ deployment
       command: kubectl rollout status deployment/rabbitmq -n default
