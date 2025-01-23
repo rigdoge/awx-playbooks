@@ -1,0 +1,247 @@
+---
+- name: Deploy Prometheus Stack (AMD64)
+  hosts: localhost
+  become: yes
+  tasks:
+    - name: Download kubectl
+      get_url:
+        url: https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl
+        dest: /usr/local/bin/kubectl
+        mode: '0755'
+      ignore_errors: yes
+
+    - name: Create directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      with_items:
+        - /opt/prometheus/prometheus
+        - /opt/prometheus/alertmanager
+        - /opt/prometheus/grafana
+
+    - name: Create prometheus config
+      copy:
+        dest: /opt/prometheus/prometheus/prometheus.yml
+        content: |
+          global:
+            scrape_interval: 15s
+            evaluation_interval: 15s
+
+          alerting:
+            alertmanagers:
+            - static_configs:
+              - targets:
+                - alertmanager:9093
+
+          rule_files:
+            - /etc/prometheus/rules/*.yml
+
+          scrape_configs:
+            - job_name: 'prometheus'
+              static_configs:
+              - targets: ['localhost:9090']
+
+            - job_name: 'kubernetes-nodes'
+              kubernetes_sd_configs:
+              - role: node
+              relabel_configs:
+              - source_labels: [__address__]
+                regex: '(.*):10250'
+                replacement: '${1}:9100'
+                target_label: __address__
+                action: replace
+
+    - name: Create alertmanager config
+      copy:
+        dest: /opt/prometheus/alertmanager/alertmanager.yml
+        content: |
+          global:
+            resolve_timeout: 5m
+
+          route:
+            group_by: ['alertname']
+            group_wait: 10s
+            group_interval: 10s
+            repeat_interval: 1h
+            receiver: 'web.hook'
+          receivers:
+          - name: 'web.hook'
+            webhook_configs:
+            - url: 'http://127.0.0.1:5001/'
+
+    - name: Create Prometheus deployment yaml
+      copy:
+        dest: /opt/prometheus/prometheus-deployment.yml
+        content: |
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: prometheus
+            namespace: default
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: prometheus
+            template:
+              metadata:
+                labels:
+                  app: prometheus
+              spec:
+                containers:
+                - name: prometheus
+                  image: prom/prometheus:v2.45.0@sha256:5d7379875698f88b95a0f2776d72962c1e9d7f385d600c1338faa4e5b82c3a91
+                  ports:
+                  - containerPort: 9090
+                  volumeMounts:
+                  - name: prometheus-config
+                    mountPath: /etc/prometheus/
+                volumes:
+                - name: prometheus-config
+                  hostPath:
+                    path: /opt/prometheus/prometheus
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: prometheus
+            namespace: default
+          spec:
+            type: NodePort
+            ports:
+            - port: 9090
+              targetPort: 9090
+              nodePort: 30090
+            selector:
+              app: prometheus
+          ---
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: alertmanager
+            namespace: default
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: alertmanager
+            template:
+              metadata:
+                labels:
+                  app: alertmanager
+              spec:
+                containers:
+                - name: alertmanager
+                  image: prom/alertmanager:v0.26.0@sha256:d7de3e6917551f71470c9b0a87b680847a0b1ffb3fcf3e8c9b4c90f87c7e0c86
+                  ports:
+                  - containerPort: 9093
+                  volumeMounts:
+                  - name: alertmanager-config
+                    mountPath: /etc/alertmanager/
+                volumes:
+                - name: alertmanager-config
+                  hostPath:
+                    path: /opt/prometheus/alertmanager
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: alertmanager
+            namespace: default
+          spec:
+            type: NodePort
+            ports:
+            - port: 9093
+              targetPort: 9093
+              nodePort: 30093
+            selector:
+              app: alertmanager
+          ---
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: grafana
+            namespace: default
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: grafana
+            template:
+              metadata:
+                labels:
+                  app: grafana
+              spec:
+                containers:
+                - name: grafana
+                  image: grafana/grafana:10.2.0@sha256:b3c23a4b5f13e34c6574e0f6b0fbb4579d2f92bac6f24d0e467ac2e6cdf1e815
+                  ports:
+                  - containerPort: 3000
+                  env:
+                  - name: GF_SECURITY_ADMIN_PASSWORD
+                    value: "admin123"
+                  volumeMounts:
+                  - name: grafana-storage
+                    mountPath: /var/lib/grafana
+                volumes:
+                - name: grafana-storage
+                  hostPath:
+                    path: /opt/prometheus/grafana
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: grafana
+            namespace: default
+          spec:
+            type: NodePort
+            ports:
+            - port: 3000
+              targetPort: 3000
+              nodePort: 30300
+            selector:
+              app: grafana
+
+    - name: Deploy Prometheus Stack
+      command: kubectl apply -f /opt/prometheus/prometheus-deployment.yml
+
+    - name: Wait for Prometheus deployment
+      command: kubectl rollout status deployment/prometheus -n default
+      register: prom_status
+      until: prom_status.rc == 0
+      retries: 30
+      delay: 10
+
+    - name: Wait for AlertManager deployment
+      command: kubectl rollout status deployment/alertmanager -n default
+      register: alert_status
+      until: alert_status.rc == 0
+      retries: 30
+      delay: 10
+
+    - name: Wait for Grafana deployment
+      command: kubectl rollout status deployment/grafana -n default
+      register: grafana_status
+      until: grafana_status.rc == 0
+      retries: 30
+      delay: 10
+
+    - name: Get pod status
+      command: kubectl get pods -n default -l 'app in (prometheus,alertmanager,grafana)' -o wide
+      register: pod_status
+
+    - name: Show pod status
+      debug:
+        var: pod_status.stdout_lines
+
+    - name: Show connection info
+      debug:
+        msg:
+          - "Prometheus Stack is running (AMD64)"
+          - "Prometheus UI: http://YOUR_SERVER_IP:30090"
+          - "AlertManager UI: http://YOUR_SERVER_IP:30093"
+          - "Grafana UI: http://YOUR_SERVER_IP:30300"
+          - "Grafana credentials:"
+          - "  Username: admin"
+          - "  Password: admin123" 

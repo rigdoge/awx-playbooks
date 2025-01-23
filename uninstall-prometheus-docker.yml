@@ -1,0 +1,36 @@
+---
+- name: Uninstall Prometheus Stack with Docker
+  hosts: localhost
+  become: yes
+  tasks:
+    - name: Stop and remove containers
+      docker_container:
+        name: "{{ item }}"
+        state: absent
+      with_items:
+        - prometheus
+        - alertmanager
+        - grafana
+
+    - name: Remove Docker images
+      docker_image:
+        name: "{{ item }}"
+        state: absent
+      with_items:
+        - prom/prometheus:v2.45.0
+        - prom/alertmanager:v0.26.0
+        - grafana/grafana:10.2.0
+
+    - name: Remove Docker network
+      docker_network:
+        name: monitoring
+        state: absent
+
+    - name: Remove Prometheus directories
+      file:
+        path: /opt/prometheus
+        state: absent
+
+    - name: Show cleanup status
+      debug:
+        msg: "Prometheus Stack Docker containers have been uninstalled and cleaned up" 
