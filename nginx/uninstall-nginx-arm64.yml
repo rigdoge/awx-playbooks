@@ -2,7 +2,8 @@
 - name: Uninstall Nginx from K3s (ARM64)
   hosts: localhost
   become: yes
-  gather_facts: yes
+  gather_facts: no
+
   pre_tasks:
     - name: Check if sudo is installed
       raw: which sudo
@@ -12,17 +13,21 @@
 
     - name: Install sudo if not present (Debian/Ubuntu)
       raw: apt-get update && apt-get install -y sudo
-      when: sudo_check.rc != 0 and ansible_os_family == "Debian"
+      when: sudo_check.rc != 0
       ignore_errors: yes
 
     - name: Install sudo if not present (RedHat/CentOS)
       raw: yum install -y sudo
-      when: sudo_check.rc != 0 and ansible_os_family == "RedHat"
+      when: sudo_check.rc != 0
       ignore_errors: yes
 
     - name: Verify sudo is installed
       raw: which sudo
       changed_when: false
+
+    - name: Gather facts
+      setup:
+      when: sudo_check.rc == 0
 
   tasks:
     - name: Delete Nginx service
