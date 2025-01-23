@@ -23,7 +23,6 @@
     - name: Create Nginx deployment yaml
       kubernetes.core.k8s:
         state: present
-        mode: '0644'
         definition:
           apiVersion: apps/v1
           kind: Deployment
@@ -41,27 +40,27 @@
                   app: nginx
               spec:
                 containers:
-                - name: nginx
-                  image: nginx:1.24@sha256:6db391d1c0cfb30588ba0bf72ea999404f2764febf0f1f196acd5867ac7efa7e
-                  ports:
-                  - containerPort: 80
-                  volumeMounts:
-                  - name: nginx-conf
-                    mountPath: /etc/nginx/conf.d
-                  - name: nginx-html
-                    mountPath: /usr/share/nginx/html
-                  - name: nginx-logs
-                    mountPath: /var/log/nginx
+                  - name: nginx
+                    image: nginx:1.24@sha256:6db391d1c0cfb30588ba0bf72ea999404f2764febf0f1f196acd5867ac7efa7e
+                    ports:
+                      - containerPort: 80
+                    volumeMounts:
+                      - name: nginx-conf
+                        mountPath: /etc/nginx/conf.d
+                      - name: nginx-html
+                        mountPath: /usr/share/nginx/html
+                      - name: nginx-logs
+                        mountPath: /var/log/nginx
                 volumes:
-                - name: nginx-conf
-                  hostPath:
-                    path: /opt/nginx/conf
-                - name: nginx-html
-                  hostPath:
-                    path: /opt/nginx/html
-                - name: nginx-logs
-                  hostPath:
-                    path: /opt/nginx/logs
+                  - name: nginx-conf
+                    hostPath:
+                      path: /opt/nginx/conf
+                  - name: nginx-html
+                    hostPath:
+                      path: /opt/nginx/html
+                  - name: nginx-logs
+                    hostPath:
+                      path: /opt/nginx/logs
 
     - name: Create Nginx service
       kubernetes.core.k8s:
@@ -75,10 +74,10 @@
           spec:
             type: NodePort
             ports:
-            - name: http
-              port: 80
-              targetPort: 80
-              nodePort: 30080
+              - name: http
+                port: 80
+                targetPort: 80
+                nodePort: 30080
             selector:
               app: nginx
 
