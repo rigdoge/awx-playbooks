@@ -3,7 +3,7 @@
   hosts: localhost
   tasks:
     - name: Delete RabbitMQ deployment and service
-      command: kubectl delete -f /home/ubuntu/rabbitmq/rabbitmq-deployment.yml
+      command: kubectl delete -f /opt/rabbitmq/rabbitmq-deployment.yml
       ignore_errors: yes
 
     - name: Wait for RabbitMQ pods to be removed
@@ -16,7 +16,7 @@
 
     - name: Remove RabbitMQ directories
       file:
-        path: /home/ubuntu/rabbitmq
+        path: /opt/rabbitmq
         state: absent
 
     - name: Show cleanup status
