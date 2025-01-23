@@ -1,123 +1,105 @@
 ---
 - name: Uninstall RabbitMQ (AMD64)
   hosts: localhost
-  become: yes
   gather_facts: no
 
   pre_tasks:
-    - name: Check if sudo is installed
-      raw: which sudo
-      register: sudo_check
-      ignore_errors: yes
+    - name: Check current user
+      raw: whoami
+      register: current_user
       changed_when: false
 
-    - name: Install sudo if not present (Debian/Ubuntu)
+    - name: Check if running as root
+      set_fact:
+        is_root: "{{ current_user.stdout == 'root' }}"
+
+    - name: Check if sudo is available
+      raw: command -v sudo
+      register: sudo_check
+      changed_when: false
+
+    - name: Set become method
+      set_fact:
+        can_sudo: "{{ sudo_check.rc == 0 }}"
+
+    - name: Install sudo on Debian/Ubuntu systems
       raw: apt-get update && apt-get install -y sudo
-      when: sudo_check.rc != 0
-      ignore_errors: yes
+      when: not can_sudo and not is_root
+      become: yes
+      become_method: ansible.builtin.sudo
+      failed_when: false
 
-    - name: Install sudo if not present (RedHat/CentOS)
+    - name: Install sudo on RedHat/CentOS systems
       raw: yum install -y sudo
-      when: sudo_check.rc != 0
-      ignore_errors: yes
+      when: not can_sudo and not is_root
+      become: yes
+      become_method: ansible.builtin.sudo
+      failed_when: false
 
-    - name: Verify sudo is installed
-      raw: which sudo
+    - name: Verify privileges
+      raw: if command -v sudo >/dev/null 2>&1; then sudo -n true 2>/dev/null; else id -u; fi
+      register: priv_check
       changed_when: false
 
     - name: Gather facts
       setup:
-      when: sudo_check.rc == 0
+      when: priv_check.rc == 0
+      become: "{{ not is_root }}"
+      become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
 
   tasks:
-    # 删除 RabbitMQ Service
-    - name: Delete RabbitMQ service
-      kubernetes.core.k8s:
+    - name: Set become method for all tasks
+      set_fact:
+        ansible_become: "{{ not is_root }}"
+        ansible_become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
+
+    # 停止 RabbitMQ 服务
+    - name: Stop RabbitMQ service
+      systemd:
+        name: rabbitmq-server
+        state: stopped
+        enabled: no
+      become: "{{ not is_root }}"
+      become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
+      failed_when: false
+
+    # 删除 RabbitMQ 包
+    - name: Remove RabbitMQ package (Debian/Ubuntu)
+      apt:
+        name:
+          - rabbitmq-server
+          - erlang
         state: absent
-        definition:
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: rabbitmq
-            namespace: default
+        purge: yes
+      when: ansible_os_family == "Debian"
+      become: "{{ not is_root }}"
+      become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
+      failed_when: false
 
-    # 删除 RabbitMQ Deployment
-    - name: Delete RabbitMQ deployment
-      kubernetes.core.k8s:
+    - name: Remove RabbitMQ package (RedHat/CentOS)
+      yum:
+        name:
+          - rabbitmq-server
+          - erlang
         state: absent
-        definition:
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: rabbitmq
-            namespace: default
+      when: ansible_os_family == "RedHat"
+      become: "{{ not is_root }}"
+      become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
+      failed_when: false
 
-    # 等待 Pod 被删除
-    - name: Wait for RabbitMQ pods to be removed
-      command: kubectl get pods -l app=rabbitmq -n default
-      register: pod_check
-      until: pod_check.rc != 0 or pod_check.stdout == ""
-      retries: 30
-      delay: 10
-      ignore_errors: yes
-
-    # 强制删除任何残留的 Pod
-    - name: Force delete any remaining RabbitMQ pods
-      command: kubectl delete pods -l app=rabbitmq -n default --force --grace-period=0
-      ignore_errors: yes
-
-    # 删除数据和配置目录
+    # 删除 RabbitMQ 目录
     - name: Remove RabbitMQ directories
       file:
         path: "{{ item }}"
         state: absent
+        mode: "0755"
       with_items:
-        - /opt/rabbitmq
-        - /opt/rabbitmq/data
-        - /opt/rabbitmq/config
-        - /var/lib/rabbitmq
         - /etc/rabbitmq
+        - /var/lib/rabbitmq
+        - /var/log/rabbitmq
+      become: "{{ not is_root }}"
+      become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
 
-    # 删除 kubectl
-    - name: Remove kubectl binary
-      file:
-        path: /usr/local/bin/kubectl
-        state: absent
-      when: "'kubectl' in ansible_facts.packages|default([])"
-
-    # 清理其他 Kubernetes 资源
-    - name: Clean up PersistentVolumes
-      command: kubectl delete pv -l app=rabbitmq
-      ignore_errors: yes
-
-    - name: Clean up PersistentVolumeClaims
-      command: kubectl delete pvc -l app=rabbitmq
-      ignore_errors: yes
-
-    - name: Clean up ConfigMaps
-      command: kubectl delete configmap -l app=rabbitmq
-      ignore_errors: yes
-
-    - name: Clean up Secrets
-      command: kubectl delete secret -l app=rabbitmq
-      ignore_errors: yes
-
-    # 删除用户和虚拟主机（如果可能）
-    - name: Try to delete development vhost
-      command: >
-        kubectl exec -n default deployment/rabbitmq --
-        rabbitmqctl delete_vhost /development
-      ignore_errors: yes
-
-    - name: Try to delete development user
-      command: >
-        kubectl exec -n default deployment/rabbitmq --
-        rabbitmqctl delete_user dev
-      ignore_errors: yes
-
-    - name: Show uninstall status
+    - name: Debug message
       debug:
-        msg:
-          - "RabbitMQ has been uninstalled"
-          - "All resources, data, and configurations have been removed"
-          - "Users and virtual hosts have been cleaned up"
+        msg: "RabbitMQ has been uninstalled and all data has been removed."

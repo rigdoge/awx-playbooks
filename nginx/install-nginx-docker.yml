@@ -16,6 +16,7 @@
     - name: Create Nginx deployment yaml
       copy:
         dest: /opt/nginx/nginx-deployment.yml
+        mode: '0644'
         content: |
           apiVersion: apps/v1
           kind: Deployment
@@ -73,6 +74,7 @@
     - name: Create default nginx config
       copy:
         dest: /opt/nginx/conf/default.conf
+        mode: '0644'
         content: |
           server {
               listen       80;
@@ -92,6 +94,7 @@
     - name: Create test page
       copy:
         dest: /opt/nginx/html/index.html
+        mode: '0644'
         content: |
           <!DOCTYPE html>
           <html>

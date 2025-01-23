@@ -23,6 +23,7 @@
     - name: Create prometheus config
       copy:
         dest: /opt/prometheus/prometheus/prometheus.yml
+        mode: '0644'
         content: |
           global:
             scrape_interval: 15s
@@ -55,6 +56,7 @@
     - name: Create alertmanager config
       copy:
         dest: /opt/prometheus/alertmanager/alertmanager.yml
+        mode: '0644'
         content: |
           global:
             resolve_timeout: 5m
@@ -73,6 +75,7 @@
     - name: Create Prometheus deployment yaml
       copy:
         dest: /opt/prometheus/prometheus-deployment.yml
+        mode: '0644'
         content: |
           apiVersion: apps/v1
           kind: Deployment

@@ -1,160 +1,192 @@
 ---
 - name: Uninstall Prometheus Stack (AMD64)
   hosts: localhost
-  become: yes
   gather_facts: no
 
   pre_tasks:
-    - name: Check if sudo is installed
-      raw: which sudo
-      register: sudo_check
-      ignore_errors: yes
+    - name: Check current user
+      raw: whoami
+      register: current_user
       changed_when: false
 
-    - name: Install sudo if not present (Debian/Ubuntu)
+    - name: Check if running as root
+      set_fact:
+        is_root: "{{ current_user.stdout == 'root' }}"
+
+    - name: Check if sudo is available
+      raw: command -v sudo
+      register: sudo_check
+      changed_when: false
+
+    - name: Set become method
+      set_fact:
+        can_sudo: "{{ sudo_check.rc == 0 }}"
+
+    - name: Install sudo on Debian/Ubuntu systems
       raw: apt-get update && apt-get install -y sudo
-      when: sudo_check.rc != 0
-      ignore_errors: yes
+      when: not can_sudo and not is_root
+      become: yes
+      become_method: ansible.builtin.sudo
+      failed_when: false
 
-    - name: Install sudo if not present (RedHat/CentOS)
+    - name: Install sudo on RedHat/CentOS systems
       raw: yum install -y sudo
-      when: sudo_check.rc != 0
-      ignore_errors: yes
+      when: not can_sudo and not is_root
+      become: yes
+      become_method: ansible.builtin.sudo
+      failed_when: false
 
-    - name: Verify sudo is installed
-      raw: which sudo
+    - name: Verify privileges
+      raw: if command -v sudo >/dev/null 2>&1; then sudo -n true 2>/dev/null; else id -u; fi
+      register: priv_check
       changed_when: false
 
     - name: Gather facts
       setup:
-      when: sudo_check.rc == 0
+      when: priv_check.rc == 0
+      become: "{{ not is_root }}"
+      become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
 
   tasks:
+    - name: Set become method for all tasks
+      set_fact:
+        ansible_become: "{{ not is_root }}"
+        ansible_become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
+
     # 删除 Grafana
     - name: Delete Grafana service
       kubernetes.core.k8s:
         state: absent
-        definition:
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: grafana
-            namespace: default
+        api_version: v1
+        kind: Service
+        name: grafana
+        namespace: monitoring
 
     - name: Delete Grafana deployment
       kubernetes.core.k8s:
         state: absent
-        definition:
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: grafana
-            namespace: default
+        api_version: apps/v1
+        kind: Deployment
+        name: grafana
+        namespace: monitoring
 
     # 删除 AlertManager
     - name: Delete AlertManager service
       kubernetes.core.k8s:
         state: absent
-        definition:
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: alertmanager
-            namespace: default
+        api_version: v1
+        kind: Service
+        name: alertmanager
+        namespace: monitoring
 
     - name: Delete AlertManager deployment
       kubernetes.core.k8s:
         state: absent
-        definition:
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: alertmanager
-            namespace: default
+        api_version: apps/v1
+        kind: Deployment
+        name: alertmanager
+        namespace: monitoring
 
     # 删除 Prometheus
     - name: Delete Prometheus service
       kubernetes.core.k8s:
         state: absent
-        definition:
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: prometheus
-            namespace: default
+        api_version: v1
+        kind: Service
+        name: prometheus
+        namespace: monitoring
 
     - name: Delete Prometheus deployment
       kubernetes.core.k8s:
         state: absent
-        definition:
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: prometheus
-            namespace: default
+        api_version: apps/v1
+        kind: Deployment
+        name: prometheus
+        namespace: monitoring
 
-    # 等待所有 Pod 被删除
-    - name: Wait for all pods to be removed
-      command: kubectl get pods -l 'app in (prometheus,alertmanager,grafana)' -n default
-      register: pod_check
-      until: pod_check.rc != 0 or pod_check.stdout == ""
+    # 等待 Pod 删除完成
+    - name: Wait for Prometheus pods to be removed
+      command: kubectl get pods -n monitoring -l "app in (prometheus,alertmanager,grafana)"
+      register: pods_check
       retries: 30
       delay: 10
-      ignore_errors: yes
+      until: pods_check.rc != 0
+      changed_when: false
+      failed_when: false
 
-    # 强制删除任何残留的 Pod
+    # 强制删除残留的 Pod
     - name: Force delete any remaining pods
-      command: kubectl delete pods -l 'app in (prometheus,alertmanager,grafana)' -n default --force --grace-period=0
-      ignore_errors: yes
+      command: kubectl delete pods -n monitoring --force --grace-period=0 -l "app in (prometheus,alertmanager,grafana)"
+      when: pods_check.rc == 0
+      failed_when: false
 
-    # 删除数据目录
-    - name: Remove Prometheus Stack directories
+    # 清理目录
+    - name: Remove Prometheus directories
       file:
         path: "{{ item }}"
         state: absent
+        mode: "0755"
       with_items:
         - /opt/prometheus
-        - /opt/prometheus/prometheus
-        - /opt/prometheus/alertmanager
-        - /opt/prometheus/grafana
+        - /opt/alertmanager
+        - /opt/grafana
+        - /var/lib/prometheus
+        - /etc/prometheus
+        - /etc/alertmanager
+        - /etc/grafana
 
-    # 删除 kubectl
-    - name: Remove kubectl binary
-      file:
-        path: /usr/local/bin/kubectl
+    # 清理 Kubernetes 资源
+    - name: Delete PersistentVolumes
+      kubernetes.core.k8s:
         state: absent
-      when: "'kubectl' in ansible_facts.packages|default([])"
+        api_version: v1
+        kind: PersistentVolume
+        name: "{{ item }}"
+      with_items:
+        - prometheus-pv
+        - alertmanager-pv
+        - grafana-pv
+      failed_when: false
 
-    # 清理其他 Kubernetes 资源
-    - name: Clean up PersistentVolumes
-      command: kubectl delete pv -l 'app in (prometheus,alertmanager,grafana)'
-      ignore_errors: yes
+    - name: Delete PersistentVolumeClaims
+      kubernetes.core.k8s:
+        state: absent
+        api_version: v1
+        kind: PersistentVolumeClaim
+        name: "{{ item }}"
+        namespace: monitoring
+      with_items:
+        - prometheus-pvc
+        - alertmanager-pvc
+        - grafana-pvc
+      failed_when: false
 
-    - name: Clean up PersistentVolumeClaims
-      command: kubectl delete pvc -l 'app in (prometheus,alertmanager,grafana)'
-      ignore_errors: yes
+    - name: Delete ConfigMaps
+      kubernetes.core.k8s:
+        state: absent
+        api_version: v1
+        kind: ConfigMap
+        name: "{{ item }}"
+        namespace: monitoring
+      with_items:
+        - prometheus-config
+        - alertmanager-config
+        - grafana-config
+      failed_when: false
 
-    - name: Clean up ConfigMaps
-      command: kubectl delete configmap -l 'app in (prometheus,alertmanager,grafana)'
-      ignore_errors: yes
+    - name: Delete Secrets
+      kubernetes.core.k8s:
+        state: absent
+        api_version: v1
+        kind: Secret
+        name: "{{ item }}"
+        namespace: monitoring
+      with_items:
+        - prometheus-secret
+        - alertmanager-secret
+        - grafana-secret
+      failed_when: false
 
-    - name: Clean up Secrets
-      command: kubectl delete secret -l 'app in (prometheus,alertmanager,grafana)'
-      ignore_errors: yes
-
-    # 删除 ServiceMonitor (如果使用了 Prometheus Operator)
-    - name: Clean up ServiceMonitors
-      command: kubectl delete servicemonitor -l 'app in (prometheus,alertmanager,grafana)'
-      ignore_errors: yes
-
-    # 删除 PrometheusRule (如果使用了 Prometheus Operator)
-    - name: Clean up PrometheusRules
-      command: kubectl delete prometheusrule -l 'app in (prometheus,alertmanager,grafana)'
-      ignore_errors: yes
-
-    - name: Show uninstall status
+    - name: Debug message
       debug:
-        msg:
-          - "Prometheus Stack has been uninstalled"
-          - "All components (Prometheus, AlertManager, Grafana) have been removed"
-          - "All data and configurations have been cleaned up"
+        msg: "Prometheus Stack has been uninstalled and all data has been removed."

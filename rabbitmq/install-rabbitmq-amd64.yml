@@ -1,178 +1,150 @@
 ---
-- name: Deploy RabbitMQ 3.13.7 Container (AMD64)
+- name: Install RabbitMQ (AMD64)
   hosts: localhost
-  become: yes
-  gather_facts: yes
+  gather_facts: no
+
   pre_tasks:
-    - name: Check if sudo is installed
-      raw: which sudo
+    - name: Check current user
+      raw: whoami
+      register: current_user
+      changed_when: false
+
+    - name: Check if running as root
+      set_fact:
+        is_root: "{{ current_user.stdout == 'root' }}"
+
+    - name: Check if sudo is available
+      raw: command -v sudo
       register: sudo_check
-      ignore_errors: yes
       changed_when: false
 
-    - name: Install sudo if not present (Debian/Ubuntu)
+    - name: Set become method
+      set_fact:
+        can_sudo: "{{ sudo_check.rc == 0 }}"
+
+    - name: Install sudo on Debian/Ubuntu systems
       raw: apt-get update && apt-get install -y sudo
-      when: sudo_check.rc != 0 and ansible_os_family == "Debian"
-      ignore_errors: yes
-
-    - name: Install sudo if not present (RedHat/CentOS)
-      raw: yum install -y sudo
-      when: sudo_check.rc != 0 and ansible_os_family == "RedHat"
-      ignore_errors: yes
-
-    - name: Verify sudo is installed
-      raw: which sudo
-      changed_when: false
-      
-  tasks:
-    - name: Download kubectl
-      get_url:
-        url: https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl
-        dest: /usr/local/bin/kubectl
-        mode: '0755'
+      when: not can_sudo and not is_root
+      become: yes
+      become_method: ansible.builtin.sudo
       failed_when: false
 
+    - name: Install sudo on RedHat/CentOS systems
+      raw: yum install -y sudo
+      when: not can_sudo and not is_root
+      become: yes
+      become_method: ansible.builtin.sudo
+      failed_when: false
+
+    - name: Verify privileges
+      raw: if command -v sudo >/dev/null 2>&1; then sudo -n true 2>/dev/null; else id -u; fi
+      register: priv_check
+      changed_when: false
+
+    - name: Gather facts
+      setup:
+      when: priv_check.rc == 0
+      become: "{{ not is_root }}"
+      become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
+
+  tasks:
+    - name: Set become method for all tasks
+      set_fact:
+        ansible_become: "{{ not is_root }}"
+        ansible_become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
+
+    # 创建必要的目录
     - name: Create RabbitMQ directories
       file:
         path: "{{ item }}"
         state: directory
-        mode: '0755'
+        mode: "0755"
       with_items:
-        - /opt/rabbitmq/data
-        - /opt/rabbitmq/config
+        - /etc/rabbitmq
+        - /var/lib/rabbitmq
+        - /var/log/rabbitmq
 
-    - name: Create RabbitMQ deployment yaml
-      kubernetes.core.k8s:
+    # 安装 RabbitMQ
+    - name: Install RabbitMQ (Debian/Ubuntu)
+      apt:
+        name:
+          - rabbitmq-server
+          - erlang
         state: present
-        definition:
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: rabbitmq
-            namespace: default
-          spec:
-            replicas: 1
-            selector:
-              matchLabels:
-                app: rabbitmq
-            template:
-              metadata:
-                labels:
-                  app: rabbitmq
-              spec:
-                containers:
-                  - name: rabbitmq
-                    image: >-
-                      rabbitmq:3.13.7-management@
-                      sha256:a6d5e08f5d5f1d6f8f9e56e1b6f0c4f6c2c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0
-                    ports:
-                      - containerPort: 5672
-                      - containerPort: 15672
-                    env:
-                      - name: RABBITMQ_DEFAULT_USER
-                        value: "admin"
-                      - name: RABBITMQ_DEFAULT_PASS
-                        value: "admin123"
-                    volumeMounts:
-                      - name: rabbitmq-data
-                        mountPath: /var/lib/rabbitmq
-                      - name: rabbitmq-config
-                        mountPath: /etc/rabbitmq
-                volumes:
-                  - name: rabbitmq-data
-                    hostPath:
-                      path: /opt/rabbitmq/data
-                  - name: rabbitmq-config
-                    hostPath:
-                      path: /opt/rabbitmq/config
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+      become: "{{ not is_root }}"
+      become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
 
-    - name: Create RabbitMQ service
-      kubernetes.core.k8s:
+    - name: Install RabbitMQ (RedHat/CentOS)
+      yum:
+        name:
+          - rabbitmq-server
+          - erlang
         state: present
-        definition:
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: rabbitmq
-            namespace: default
-          spec:
-            type: NodePort
-            ports:
-              - name: amqp
-                port: 5672
-                targetPort: 5672
-                nodePort: 30672
-              - name: management
-                port: 15672
-                targetPort: 15672
-                nodePort: 31672
-            selector:
-              app: rabbitmq
+      when: ansible_os_family == "RedHat"
+      become: "{{ not is_root }}"
+      become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
 
-    - name: Deploy RabbitMQ to K3s
-      command: kubectl apply -f /opt/rabbitmq/rabbitmq-deployment.yml
+    # 配置 RabbitMQ
+    - name: Create RabbitMQ configuration
+      copy:
+        dest: /etc/rabbitmq/rabbitmq.conf
+        content: |
+          listeners.tcp.default = 5672
+          management.tcp.port = 15672
+          management.load_definitions = /etc/rabbitmq/definitions.json
+        mode: "0644"
+      become: "{{ not is_root }}"
+      become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
 
-    - name: Wait for RabbitMQ deployment
-      command: kubectl rollout status deployment/rabbitmq -n default
-      register: rollout_status
-      until: rollout_status.rc == 0
-      retries: 30
-      delay: 10
+    - name: Create RabbitMQ definitions
+      copy:
+        dest: /etc/rabbitmq/definitions.json
+        content: |
+          {
+            "users": [
+              {
+                "name": "admin",
+                "password_hash": "{{ 'admin' | password_hash('sha512') }}",
+                "tags": "administrator"
+              }
+            ],
+            "vhosts": [
+              {
+                "name": "/"
+              }
+            ],
+            "permissions": [
+              {
+                "user": "admin",
+                "vhost": "/",
+                "configure": ".*",
+                "write": ".*",
+                "read": ".*"
+              }
+            ]
+          }
+        mode: "0644"
+      become: "{{ not is_root }}"
+      become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
 
-    - name: Wait for RabbitMQ to be ready
-      uri:
-        url: http://localhost:31672
-        status_code: 200
-      register: result
-      until: result.status == 200
-      retries: 30
-      delay: 10
-      failed_when: false
+    # 启动 RabbitMQ 服务
+    - name: Start RabbitMQ service
+      systemd:
+        name: rabbitmq-server
+        state: started
+        enabled: yes
+      become: "{{ not is_root }}"
+      become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
 
-    - name: Create virtual host
-      command: >
-        kubectl exec -n default deployment/rabbitmq --
-        rabbitmqctl add_vhost /development
-      failed_when: false
+    # 启用 RabbitMQ 管理插件
+    - name: Enable RabbitMQ management plugin
+      command: rabbitmq-plugins enable rabbitmq_management
+      become: "{{ not is_root }}"
+      become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
+      changed_when: false
 
-    - name: Create development user
-      command: >
-        kubectl exec -n default deployment/rabbitmq --
-        rabbitmqctl add_user dev dev123
-      failed_when: false
-
-    - name: Set permissions for development user
-      command: >
-        kubectl exec -n default deployment/rabbitmq --
-        rabbitmqctl set_permissions -p /development dev ".*" ".*" ".*"
-      failed_when: false
-
-    - name: Enable management plugin for dev user
-      command: >
-        kubectl exec -n default deployment/rabbitmq --
-        rabbitmqctl set_user_tags dev management
-      failed_when: false
-
-    - name: Get cluster status
-      command: >
-        kubectl exec -n default deployment/rabbitmq --
-        rabbitmqctl cluster_status
-      register: cluster_status
-
-    - name: Show cluster status
+    - name: Debug message
       debug:
-        var: cluster_status.stdout_lines
-
-    - name: Show RabbitMQ connection info
-      debug:
-        msg:
-          - "RabbitMQ is running (AMD64)"
-          - "Management UI: http://YOUR_SERVER_IP:31672"
-          - "AMQP Port: 30672"
-          - "Admin credentials:"
-          - "  Username: admin"
-          - "  Password: admin123"
-          - "Development credentials:"
-          - "  Username: dev"
-          - "  Password: dev123"
-          - "  Virtual Host: /development"
+        msg: "RabbitMQ has been installed and configured successfully."

@@ -1,143 +1,156 @@
 ---
-- name: Install Nginx using K3s (ARM64)
+- name: Install Nginx (ARM64)
   hosts: localhost
-  become: yes
-  gather_facts: yes
+  gather_facts: no
+
   pre_tasks:
-    - name: Check if sudo is installed
-      raw: which sudo
+    - name: Check current user
+      raw: whoami
+      register: current_user
+      changed_when: false
+
+    - name: Check if running as root
+      set_fact:
+        is_root: "{{ current_user.stdout == 'root' }}"
+
+    - name: Check if sudo is available
+      raw: command -v sudo
       register: sudo_check
-      ignore_errors: yes
       changed_when: false
 
-    - name: Install sudo if not present (Debian/Ubuntu)
+    - name: Set become method
+      set_fact:
+        can_sudo: "{{ sudo_check.rc == 0 }}"
+
+    - name: Install sudo on Debian/Ubuntu systems
       raw: apt-get update && apt-get install -y sudo
-      when: sudo_check.rc != 0 and ansible_os_family == "Debian"
-      ignore_errors: yes
-
-    - name: Install sudo if not present (RedHat/CentOS)
-      raw: yum install -y sudo
-      when: sudo_check.rc != 0 and ansible_os_family == "RedHat"
-      ignore_errors: yes
-
-    - name: Verify sudo is installed
-      raw: which sudo
-      changed_when: false
-      
-  tasks:
-    - name: Download kubectl
-      get_url:
-        url: https://dl.k8s.io/release/v1.28.0/bin/linux/arm64/kubectl
-        dest: /usr/local/bin/kubectl
-        mode: '0755'
+      when: not can_sudo and not is_root
+      become: yes
+      become_method: ansible.builtin.sudo
       failed_when: false
 
+    - name: Install sudo on RedHat/CentOS systems
+      raw: yum install -y sudo
+      when: not can_sudo and not is_root
+      become: yes
+      become_method: ansible.builtin.sudo
+      failed_when: false
+
+    - name: Verify privileges
+      raw: if command -v sudo >/dev/null 2>&1; then sudo -n true 2>/dev/null; else id -u; fi
+      register: priv_check
+      changed_when: false
+
+    - name: Gather facts
+      setup:
+      when: priv_check.rc == 0
+      become: "{{ not is_root }}"
+      become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
+
+  tasks:
+    - name: Set become method for all tasks
+      set_fact:
+        ansible_become: "{{ not is_root }}"
+        ansible_become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
+
+    # 创建必要的目录
     - name: Create Nginx directories
       file:
         path: "{{ item }}"
         state: directory
-        mode: '0755'
+        mode: "0755"
       with_items:
-        - /opt/nginx/conf
-        - /opt/nginx/html
-        - /opt/nginx/logs
+        - /etc/nginx
+        - /etc/nginx/conf.d
+        - /var/log/nginx
+        - /var/www/html
 
-    - name: Create Nginx deployment yaml
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: nginx
-            namespace: default
-          spec:
-            replicas: 1
-            selector:
-              matchLabels:
-                app: nginx
-            template:
-              metadata:
-                labels:
-                  app: nginx
-              spec:
-                containers:
-                  - name: nginx
-                    image: nginx:1.24@sha256:6db391d1c0cfb30588ba0bf72ea999404f2764febf0f1f196acd5867ac7efa7e
-                    ports:
-                      - containerPort: 80
-                    volumeMounts:
-                      - name: nginx-conf
-                        mountPath: /etc/nginx/conf.d
-                      - name: nginx-html
-                        mountPath: /usr/share/nginx/html
-                      - name: nginx-logs
-                        mountPath: /var/log/nginx
-                volumes:
-                  - name: nginx-conf
-                    hostPath:
-                      path: /opt/nginx/conf
-                  - name: nginx-html
-                    hostPath:
-                      path: /opt/nginx/html
-                  - name: nginx-logs
-                    hostPath:
-                      path: /opt/nginx/logs
+    # 创建 Nginx 配置文件
+    - name: Create Nginx configuration
+      copy:
+        dest: /etc/nginx/nginx.conf
+        content: |
+          user nginx;
+          worker_processes auto;
+          error_log /var/log/nginx/error.log;
+          pid /run/nginx.pid;
 
-    - name: Create Nginx service
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: nginx
-            namespace: default
-          spec:
-            type: NodePort
-            ports:
-              - name: http
-                port: 80
-                targetPort: 80
-                nodePort: 30080
-            selector:
-              app: nginx
+          events {
+              worker_connections 1024;
+          }
 
-    - name: Create default nginx config
-      template:
-        src: templates/default.conf.j2
-        dest: /opt/nginx/conf/default.conf
-        mode: '0644'
+          http {
+              log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                              '$status $body_bytes_sent "$http_referer" '
+                              '"$http_user_agent" "$http_x_forwarded_for"';
 
+              access_log  /var/log/nginx/access.log  main;
+
+              sendfile            on;
+              tcp_nopush          on;
+              tcp_nodelay         on;
+              keepalive_timeout   65;
+              types_hash_max_size 2048;
+
+              include             /etc/nginx/mime.types;
+              default_type        application/octet-stream;
+
+              include /etc/nginx/conf.d/*.conf;
+          }
+        mode: "0644"
+
+    # 创建默认站点配置
+    - name: Create default site configuration
+      copy:
+        dest: /etc/nginx/conf.d/default.conf
+        content: |
+          server {
+              listen       80;
+              server_name  localhost;
+              root         /var/www/html;
+
+              location / {
+                  index  index.html;
+              }
+
+              error_page  404              /404.html;
+              error_page  500 502 503 504  /50x.html;
+          }
+        mode: "0644"
+
+    # 创建测试页面
     - name: Create test page
-      template:
-        src: templates/index.html.j2
-        dest: /opt/nginx/html/index.html
-        mode: '0644'
+      copy:
+        dest: /var/www/html/index.html
+        content: |
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Welcome to Nginx!</title>
+              <style>
+                  body {
+                      width: 35em;
+                      margin: 0 auto;
+                      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                  }
+              </style>
+          </head>
+          <body>
+              <h1>Welcome to Nginx!</h1>
+              <p>If you see this page, the Nginx web server is successfully installed and working.</p>
+          </body>
+          </html>
+        mode: "0644"
 
-    - name: Deploy Nginx to K3s
-      command: kubectl apply -f /opt/nginx/nginx-deployment.yml
+    # 启动 Nginx 服务
+    - name: Start Nginx service
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+      become: "{{ not is_root }}"
+      become_method: "{{ can_sudo | ternary('ansible.builtin.sudo', 'ansible.builtin.su') }}"
 
-    - name: Wait for Nginx deployment
-      command: kubectl rollout status deployment/nginx -n default
-      register: rollout_status
-      until: rollout_status.rc == 0
-      retries: 30
-      delay: 10
-
-    - name: Show Nginx status
-      command: kubectl get pods -l app=nginx -n default
-      register: nginx_status
-
-    - name: Show Nginx pod status
+    - name: Debug message
       debug:
-        var: nginx_status.stdout_lines
-
-    - name: Show Nginx access info
-      debug:
-        msg:
-          - "Nginx is running (ARM64)"
-          - "Access URL: http://YOUR_SERVER_IP:30080"
-          - "Configuration directory: /opt/nginx/conf"
-          - "HTML directory: /opt/nginx/html"
-          - "Logs directory: /opt/nginx/logs"
+        msg: "Nginx has been installed and configured successfully."

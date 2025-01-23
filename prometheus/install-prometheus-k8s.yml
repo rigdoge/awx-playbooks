@@ -16,6 +16,7 @@
     - name: 创建 Prometheus 配置文件
       copy:
         dest: /opt/prometheus/prometheus/prometheus.yml
+        mode: '0644'
         content: |
           global:
             scrape_interval: 15s
@@ -42,6 +43,7 @@
     - name: 创建 AlertManager 配置文件
       copy:
         dest: /opt/prometheus/alertmanager/alertmanager.yml
+        mode: '0644'
         content: |
           global:
             resolve_timeout: 5m
@@ -61,6 +63,7 @@
     - name: 创建 Prometheus Stack 部署文件
       copy:
         dest: /opt/prometheus/prometheus-deployment.yml
+        mode: '0644'
         content: |
           apiVersion: apps/v1
           kind: Deployment

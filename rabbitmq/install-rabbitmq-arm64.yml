@@ -22,6 +22,7 @@
     - name: Create RabbitMQ deployment yaml
       copy:
         dest: /opt/rabbitmq/rabbitmq-deployment.yml
+        mode: '0644'
         content: |
           apiVersion: apps/v1
           kind: Deployment
