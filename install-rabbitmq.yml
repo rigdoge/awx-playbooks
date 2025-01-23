@@ -94,11 +94,50 @@
       delay: 10
       ignore_errors: yes
 
+    - name: Create virtual host
+      command: >
+        kubectl exec -n default deployment/rabbitmq -- 
+        rabbitmqctl add_vhost /development
+      ignore_errors: yes
+
+    - name: Create development user
+      command: >
+        kubectl exec -n default deployment/rabbitmq -- 
+        rabbitmqctl add_user dev dev123
+      ignore_errors: yes
+
+    - name: Set permissions for development user
+      command: >
+        kubectl exec -n default deployment/rabbitmq -- 
+        rabbitmqctl set_permissions -p /development dev ".*" ".*" ".*"
+      ignore_errors: yes
+
+    - name: Enable management plugin for dev user
+      command: >
+        kubectl exec -n default deployment/rabbitmq -- 
+        rabbitmqctl set_user_tags dev management
+      ignore_errors: yes
+
+    - name: Get cluster status
+      command: >
+        kubectl exec -n default deployment/rabbitmq -- 
+        rabbitmqctl cluster_status
+      register: cluster_status
+
+    - name: Show cluster status
+      debug:
+        var: cluster_status.stdout_lines
+
     - name: Show RabbitMQ connection info
       debug:
         msg: 
           - "RabbitMQ is running"
           - "Management UI: http://YOUR_SERVER_IP:31672"
           - "AMQP Port: 30672"
-          - "Username: admin"
-          - "Password: admin123" 
+          - "Admin credentials:"
+          - "  Username: admin"
+          - "  Password: admin123"
+          - "Development credentials:"
+          - "  Username: dev"
+          - "  Password: dev123"
+          - "  Virtual Host: /development" 
