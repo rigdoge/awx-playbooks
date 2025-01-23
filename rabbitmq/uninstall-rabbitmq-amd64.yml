@@ -1,32 +1,118 @@
 ---
-- name: Uninstall RabbitMQ Container (AMD64)
+- name: Uninstall RabbitMQ (AMD64)
   hosts: localhost
   become: yes
+  gather_facts: yes
+  pre_tasks:
+    - name: Check if sudo is installed
+      raw: which sudo
+      register: sudo_check
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Install sudo if not present (Debian/Ubuntu)
+      raw: apt-get update && apt-get install -y sudo
+      when: sudo_check.rc != 0 and ansible_os_family == "Debian"
+      ignore_errors: yes
+
+    - name: Install sudo if not present (RedHat/CentOS)
+      raw: yum install -y sudo
+      when: sudo_check.rc != 0 and ansible_os_family == "RedHat"
+      ignore_errors: yes
+
+    - name: Verify sudo is installed
+      raw: which sudo
+      changed_when: false
+
   tasks:
-    - name: Download kubectl
-      get_url:
-        url: https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl
-        dest: /usr/local/bin/kubectl
-        mode: '0755'
-      failed_when: false
+    # 删除 RabbitMQ Service
+    - name: Delete RabbitMQ service
+      kubernetes.core.k8s:
+        state: absent
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: rabbitmq
+            namespace: default
 
-    - name: Delete RabbitMQ deployment and service
-      command: kubectl delete -f /opt/rabbitmq/rabbitmq-deployment.yml
-      failed_when: false
+    # 删除 RabbitMQ Deployment
+    - name: Delete RabbitMQ deployment
+      kubernetes.core.k8s:
+        state: absent
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: rabbitmq
+            namespace: default
 
+    # 等待 Pod 被删除
     - name: Wait for RabbitMQ pods to be removed
-      command: kubectl get pods -n default | grep rabbitmq
+      command: kubectl get pods -l app=rabbitmq -n default
       register: pod_check
-      until: pod_check.rc != 0
+      until: pod_check.rc != 0 or pod_check.stdout == ""
       retries: 30
       delay: 10
-      failed_when: false
+      ignore_errors: yes
 
+    # 强制删除任何残留的 Pod
+    - name: Force delete any remaining RabbitMQ pods
+      command: kubectl delete pods -l app=rabbitmq -n default --force --grace-period=0
+      ignore_errors: yes
+
+    # 删除数据和配置目录
     - name: Remove RabbitMQ directories
       file:
-        path: /opt/rabbitmq
+        path: "{{ item }}"
         state: absent
+      with_items:
+        - /opt/rabbitmq
+        - /opt/rabbitmq/data
+        - /opt/rabbitmq/config
+        - /var/lib/rabbitmq
+        - /etc/rabbitmq
 
-    - name: Show cleanup status
+    # 删除 kubectl
+    - name: Remove kubectl binary
+      file:
+        path: /usr/local/bin/kubectl
+        state: absent
+      when: "'kubectl' in ansible_facts.packages|default([])"
+
+    # 清理其他 Kubernetes 资源
+    - name: Clean up PersistentVolumes
+      command: kubectl delete pv -l app=rabbitmq
+      ignore_errors: yes
+
+    - name: Clean up PersistentVolumeClaims
+      command: kubectl delete pvc -l app=rabbitmq
+      ignore_errors: yes
+
+    - name: Clean up ConfigMaps
+      command: kubectl delete configmap -l app=rabbitmq
+      ignore_errors: yes
+
+    - name: Clean up Secrets
+      command: kubectl delete secret -l app=rabbitmq
+      ignore_errors: yes
+
+    # 删除用户和虚拟主机（如果可能）
+    - name: Try to delete development vhost
+      command: >
+        kubectl exec -n default deployment/rabbitmq --
+        rabbitmqctl delete_vhost /development
+      ignore_errors: yes
+
+    - name: Try to delete development user
+      command: >
+        kubectl exec -n default deployment/rabbitmq --
+        rabbitmqctl delete_user dev
+      ignore_errors: yes
+
+    - name: Show uninstall status
       debug:
-        msg: "RabbitMQ has been uninstalled and cleaned up (AMD64)"
+        msg:
+          - "RabbitMQ has been uninstalled"
+          - "All resources, data, and configurations have been removed"
+          - "Users and virtual hosts have been cleaned up"

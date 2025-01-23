@@ -2,24 +2,95 @@
 - name: Uninstall Nginx from K3s (ARM64)
   hosts: localhost
   become: yes
-  tasks:
-    - name: Delete Nginx deployment and service
-      command: kubectl delete -f /opt/nginx/nginx-deployment.yml
-      failed_when: false
+  gather_facts: yes
+  pre_tasks:
+    - name: Check if sudo is installed
+      raw: which sudo
+      register: sudo_check
+      ignore_errors: yes
+      changed_when: false
 
-    - name: Wait for pods to be removed
+    - name: Install sudo if not present (Debian/Ubuntu)
+      raw: apt-get update && apt-get install -y sudo
+      when: sudo_check.rc != 0 and ansible_os_family == "Debian"
+      ignore_errors: yes
+
+    - name: Install sudo if not present (RedHat/CentOS)
+      raw: yum install -y sudo
+      when: sudo_check.rc != 0 and ansible_os_family == "RedHat"
+      ignore_errors: yes
+
+    - name: Verify sudo is installed
+      raw: which sudo
+      changed_when: false
+
+  tasks:
+    - name: Delete Nginx service
+      kubernetes.core.k8s:
+        state: absent
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: nginx
+            namespace: default
+
+    - name: Delete Nginx deployment
+      kubernetes.core.k8s:
+        state: absent
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: nginx
+            namespace: default
+
+    - name: Wait for Nginx pods to be removed
       command: kubectl get pods -l app=nginx -n default
-      register: pod_status
-      until: pod_status.rc != 0 or pod_status.stdout == ""
+      register: pod_check
+      until: pod_check.rc != 0 or pod_check.stdout == ""
       retries: 30
       delay: 10
-      failed_when: false
+      ignore_errors: yes
+
+    - name: Force delete any remaining Nginx pods
+      command: kubectl delete pods -l app=nginx -n default --force --grace-period=0
+      ignore_errors: yes
 
     - name: Remove Nginx directories
       file:
-        path: /opt/nginx
+        path: "{{ item }}"
         state: absent
+      with_items:
+        - /opt/nginx
+        - /opt/nginx/conf
+        - /opt/nginx/html
+        - /opt/nginx/logs
 
-    - name: Show cleanup status
+    - name: Remove kubectl binary
+      file:
+        path: /usr/local/bin/kubectl
+        state: absent
+      when: "'kubectl' in ansible_facts.packages|default([])"
+
+    - name: Clean up PersistentVolumes (if any)
+      command: kubectl delete pv -l app=nginx
+      ignore_errors: yes
+
+    - name: Clean up PersistentVolumeClaims (if any)
+      command: kubectl delete pvc -l app=nginx
+      ignore_errors: yes
+
+    - name: Clean up ConfigMaps (if any)
+      command: kubectl delete configmap -l app=nginx
+      ignore_errors: yes
+
+    - name: Clean up Secrets (if any)
+      command: kubectl delete secret -l app=nginx
+      ignore_errors: yes
+
+    - name: Show uninstall status
       debug:
-        msg: "Nginx (ARM64) has been uninstalled and cleaned up"
+        msg:
+          - "Nginx has been uninstalled"
+          - "All resources and data have been removed"
