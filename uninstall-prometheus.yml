@@ -1,0 +1,32 @@
+---
+- name: Uninstall Prometheus Stack
+  hosts: localhost
+  become: yes
+  tasks:
+    - name: Download kubectl
+      get_url:
+        url: https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl
+        dest: /usr/local/bin/kubectl
+        mode: '0755'
+      ignore_errors: yes
+
+    - name: Delete Prometheus Stack deployment
+      command: kubectl delete -f /opt/prometheus/prometheus-deployment.yml
+      ignore_errors: yes
+
+    - name: Wait for pods to be removed
+      command: kubectl get pods -n default | grep -E 'prometheus|alertmanager|grafana'
+      register: pod_check
+      until: pod_check.rc != 0
+      retries: 30
+      delay: 10
+      ignore_errors: yes
+
+    - name: Remove Prometheus directories
+      file:
+        path: /opt/prometheus
+        state: absent
+
+    - name: Show cleanup status
+      debug:
+        msg: "Prometheus Stack has been uninstalled and cleaned up" 
