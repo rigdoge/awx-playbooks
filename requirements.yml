@@ -1,0 +1,28 @@
+---
+# 角色依赖
+roles:
+  # Nginx 角色
+  - src: geerlingguy.nginx
+    version: 3.1.0
+
+  # Percona 角色
+  - src: geerlingguy.mysql
+    version: 3.3.2
+
+  # RabbitMQ 角色
+  - src: geerlingguy.rabbitmq
+    version: 1.0.1
+
+# 集合依赖
+collections:
+  # 通用工具集合
+  - name: community.general
+    version: 7.5.0
+
+  # Kubernetes 集合
+  - name: kubernetes.core
+    version: 2.4.0
+
+  # Docker 集合
+  - name: community.docker
+    version: 3.4.8

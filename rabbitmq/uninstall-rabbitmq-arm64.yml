@@ -8,11 +8,11 @@
         url: https://dl.k8s.io/release/v1.28.0/bin/linux/arm64/kubectl
         dest: /usr/local/bin/kubectl
         mode: '0755'
-      ignore_errors: yes
+      failed_when: false
 
     - name: Delete RabbitMQ deployment and service
       command: kubectl delete -f /opt/rabbitmq/rabbitmq-deployment.yml
-      ignore_errors: yes
+      failed_when: false
 
     - name: Wait for RabbitMQ pods to be removed
       command: kubectl get pods -n default | grep rabbitmq
@@ -20,7 +20,7 @@
       until: pod_check.rc != 0
       retries: 30
       delay: 10
-      ignore_errors: yes
+      failed_when: false
 
     - name: Remove RabbitMQ directories
       file:
@@ -29,4 +29,4 @@
 
     - name: Show cleanup status
       debug:
-        msg: "RabbitMQ has been uninstalled and cleaned up (ARM64)" 
+        msg: "RabbitMQ has been uninstalled and cleaned up (ARM64)"

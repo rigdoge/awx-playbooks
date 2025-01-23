@@ -1,35 +1,36 @@
 ---
-- name: Deploy RabbitMQ on Kubernetes
+- name: 安装 RabbitMQ 到 Kubernetes
   hosts: localhost
-  become: yes
+  gather_facts: false
   tasks:
-    - name: Create directories
-      file:
+    - name: 创建必要的目录
+      ansible.builtin.file:
         path: "{{ item }}"
         state: directory
         mode: '0755'
-      with_items:
-        - /opt/rabbitmq/k8s/config
-        - /opt/rabbitmq/k8s/data
+      loop:
+        - /opt/rabbitmq/config
+        - /opt/rabbitmq/data
 
-    - name: Create namespace
-      k8s:
+    - name: 创建命名空间
+      kubernetes.core.k8s:
         name: messaging
         api_version: v1
         kind: Namespace
         state: present
 
-    - name: Create RabbitMQ config
-      copy:
-        dest: /opt/rabbitmq/k8s/config/rabbitmq.conf
+    - name: 创建 RabbitMQ 配置文件
+      ansible.builtin.copy:
+        dest: /opt/rabbitmq/config/rabbitmq.conf
         content: |
           default_user = admin
           default_pass = admin123
           management.tcp.port = 15672
           management.tcp.ip = 0.0.0.0
+        mode: '0644'
 
-    - name: Create ConfigMap
-      k8s:
+    - name: 创建 ConfigMap
+      kubernetes.core.k8s:
         state: present
         definition:
           apiVersion: v1
@@ -39,10 +40,26 @@
             namespace: messaging
           data:
             rabbitmq.conf: |
-              {{ lookup('file', '/opt/rabbitmq/k8s/config/rabbitmq.conf') }}
+              {{ lookup('file', '/opt/rabbitmq/config/rabbitmq.conf') }}
 
-    - name: Create RabbitMQ deployment
-      k8s:
+    - name: 创建 PersistentVolumeClaim
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: rabbitmq-data
+            namespace: messaging
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 1Gi
+
+    - name: 创建 RabbitMQ 部署
+      kubernetes.core.k8s:
         state: present
         definition:
           apiVersion: apps/v1
@@ -61,27 +78,29 @@
                   app: rabbitmq
               spec:
                 containers:
-                - name: rabbitmq
-                  image: rabbitmq:3.13.0-management
-                  ports:
-                  - containerPort: 5672
-                    name: amqp
-                  - containerPort: 15672
-                    name: management
-                  volumeMounts:
-                  - name: rabbitmq-config
-                    mountPath: /etc/rabbitmq/
-                  - name: rabbitmq-data
-                    mountPath: /var/lib/rabbitmq
+                  - name: rabbitmq
+                    image: rabbitmq:3.13.0-management
+                    ports:
+                      - containerPort: 5672
+                        name: amqp
+                      - containerPort: 15672
+                        name: management
+                    volumeMounts:
+                      - name: config
+                        mountPath: /etc/rabbitmq/rabbitmq.conf
+                        subPath: rabbitmq.conf
+                      - name: data
+                        mountPath: /var/lib/rabbitmq
                 volumes:
-                - name: rabbitmq-config
-                  configMap:
-                    name: rabbitmq-config
-                - name: rabbitmq-data
-                  emptyDir: {}
+                  - name: config
+                    configMap:
+                      name: rabbitmq-config
+                  - name: data
+                    persistentVolumeClaim:
+                      claimName: rabbitmq-data
 
-    - name: Create RabbitMQ service
-      k8s:
+    - name: 创建 RabbitMQ 服务
+      kubernetes.core.k8s:
         state: present
         definition:
           apiVersion: v1
@@ -92,75 +111,94 @@
           spec:
             type: NodePort
             ports:
-            - port: 5672
-              targetPort: 5672
-              nodePort: 30672
-              name: amqp
-            - port: 15672
-              targetPort: 15672
-              nodePort: 31672
-              name: management
+              - port: 5672
+                targetPort: 5672
+                nodePort: 30672
+                name: amqp
+              - port: 15672
+                targetPort: 15672
+                nodePort: 31672
+                name: management
             selector:
               app: rabbitmq
 
-    - name: Wait for deployment
-      k8s_info:
-        kind: Deployment
-        name: rabbitmq
-        namespace: messaging
-        wait: yes
-        wait_timeout: 300
-
-    - name: Get pod status
-      k8s_info:
+    - name: 等待 RabbitMQ 就绪
+      kubernetes.core.k8s_info:
         kind: Pod
         namespace: messaging
         label_selectors:
           - app=rabbitmq
       register: pod_status
+      until: pod_status.resources | length > 0 and pod_status.resources[0].status.phase == 'Running'
+      retries: 30
+      delay: 10
 
-    - name: Show pod status
-      debug:
+    - name: 等待管理界面就绪
+      kubernetes.core.k8s_info:
+        kind: Service
+        namespace: messaging
+        name: rabbitmq
+      register: service_status
+      until: service_status.resources | length > 0
+      retries: 30
+      delay: 10
+
+    - name: 显示 Pod 状态
+      ansible.builtin.debug:
         var: pod_status.resources
 
-    - name: Wait for RabbitMQ to be ready
-      pause:
+    - name: 等待 RabbitMQ 启动
+      ansible.builtin.pause:
         seconds: 30
 
-    - name: Create development vhost
-      k8s_exec:
+    - name: 创建虚拟主机
+      kubernetes.core.k8s_exec:
         namespace: messaging
         pod: "{{ pod_status.resources[0].metadata.name }}"
-        command: rabbitmqctl add_vhost /development
+        command: rabbitmqctl add_vhost development
 
-    - name: Create development user
-      k8s_exec:
+    - name: 创建开发用户
+      kubernetes.core.k8s_exec:
         namespace: messaging
         pod: "{{ pod_status.resources[0].metadata.name }}"
         command: rabbitmqctl add_user dev dev123
 
-    - name: Set development user permissions
-      k8s_exec:
+    - name: 设置用户权限
+      kubernetes.core.k8s_exec:
         namespace: messaging
         pod: "{{ pod_status.resources[0].metadata.name }}"
-        command: rabbitmqctl set_permissions -p /development dev ".*" ".*" ".*"
+        command: rabbitmqctl set_permissions -p development dev ".*" ".*" ".*"
 
-    - name: Set development user tags
-      k8s_exec:
+    - name: 设置用户标签
+      kubernetes.core.k8s_exec:
         namespace: messaging
         pod: "{{ pod_status.resources[0].metadata.name }}"
-        command: rabbitmqctl set_user_tags dev management
+        command: rabbitmqctl set_user_tags dev administrator
 
-    - name: Show connection info
-      debug:
-        msg:
-          - "RabbitMQ is running on Kubernetes"
-          - "Management UI: http://YOUR_SERVER_IP:31672"
-          - "AMQP port: 30672"
-          - "Admin credentials:"
-          - "  Username: admin"
-          - "  Password: admin123"
-          - "Development credentials:"
-          - "  Username: dev"
-          - "  Password: dev123"
-          - "  Vhost: /development" 
+    - name: 获取集群状态
+      kubernetes.core.k8s_exec:
+        namespace: messaging
+        pod: "{{ pod_status.resources[0].metadata.name }}"
+        command: rabbitmqctl cluster_status
+      register: cluster_status
+
+    - name: 显示集群状态
+      ansible.builtin.debug:
+        var: cluster_status.stdout_lines
+
+    - name: 显示访问信息
+      ansible.builtin.debug:
+        msg: |
+          RabbitMQ 已成功部署！
+          访问地址：
+          - 管理界面: http://YOUR_SERVER_IP:31672
+          - AMQP 端口: 30672
+
+          管理员凭据：
+          - 用户名: admin
+          - 密码: admin123
+
+          开发者凭据：
+          - 用户名: dev
+          - 密码: dev123
+          - 虚拟主机: development

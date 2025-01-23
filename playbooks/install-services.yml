@@ -1,0 +1,65 @@
+---
+# 安装 Nginx
+- name: 安装和配置 Nginx
+  hosts: web_servers
+  become: true
+  roles:
+    - role: geerlingguy.nginx
+      vars:
+        nginx_vhosts:
+          - listen: "80"
+            server_name: "example.com"
+            root: "/var/www/example.com"
+            index: "index.php index.html index.htm"
+            state: "present"
+            template: "{{ nginx_vhost_template }}"
+            extra_parameters: |
+              location ~ \.php$ {
+                fastcgi_split_path_info ^(.+\.php)(/.+)$;
+                fastcgi_pass unix:/var/run/php-fpm.sock;
+                fastcgi_index index.php;
+                fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+                include fastcgi_params;
+              }
+        nginx_remove_default_vhost: true
+
+# 安装 Percona
+- name: 安装和配置 Percona
+  hosts: db_servers
+  become: true
+  roles:
+    - role: geerlingguy.mysql
+      vars:
+        mysql_packages:
+          - percona-server-server-5.7
+          - percona-server-client-5.7
+          - python3-mysqldb
+        mysql_root_password: "secure_password"
+        mysql_databases:
+          - name: example_db
+            encoding: utf8mb4
+            collation: utf8mb4_unicode_ci
+        mysql_users:
+          - name: example_user
+            host: "%"
+            password: "user_password"
+            priv: "example_db.*:ALL"
+
+# 安装 RabbitMQ
+- name: 安装和配置 RabbitMQ
+  hosts: mq_servers
+  become: true
+  roles:
+    - role: geerlingguy.rabbitmq
+      vars:
+        rabbitmq_vhosts:
+          - name: development
+            state: present
+        rabbitmq_users:
+          - user: dev
+            password: dev123
+            vhost: development
+            configure_priv: .*
+            read_priv: .*
+            write_priv: .*
+            tags: administrator

@@ -69,4 +69,4 @@
 
     - name: Show cleanup status
       debug:
-        msg: "Prometheus Stack has been uninstalled from Kubernetes" 
+        msg: "Prometheus Stack has been uninstalled from Kubernetes"

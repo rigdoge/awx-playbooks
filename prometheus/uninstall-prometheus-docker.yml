@@ -33,4 +33,4 @@
 
     - name: Show cleanup status
       debug:
-        msg: "Prometheus Stack Docker containers have been uninstalled and cleaned up" 
+        msg: "Prometheus Stack Docker containers have been uninstalled and cleaned up"

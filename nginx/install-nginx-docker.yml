@@ -124,9 +124,9 @@
 
     - name: Show Nginx access info
       debug:
-        msg: 
+        msg:
           - "Nginx is running"
           - "Access URL: http://YOUR_SERVER_IP:30080"
           - "Configuration directory: /opt/nginx/conf"
           - "HTML directory: /opt/nginx/html"
-          - "Logs directory: /opt/nginx/logs" 
+          - "Logs directory: /opt/nginx/logs"

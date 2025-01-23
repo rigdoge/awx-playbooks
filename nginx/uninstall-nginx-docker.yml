@@ -20,4 +20,4 @@
 
     - name: Show cleanup status
       debug:
-        msg: "Nginx Docker container has been uninstalled and cleaned up" 
+        msg: "Nginx Docker container has been uninstalled and cleaned up"

@@ -58,4 +58,4 @@
 
     - name: Show cleanup status
       debug:
-        msg: "RabbitMQ has been uninstalled from Kubernetes" 
+        msg: "RabbitMQ has been uninstalled from Kubernetes"

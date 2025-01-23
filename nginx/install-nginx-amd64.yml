@@ -8,7 +8,7 @@
         url: https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl
         dest: /usr/local/bin/kubectl
         mode: '0755'
-      ignore_errors: yes
+      failed_when: false
 
     - name: Create Nginx directories
       file:
@@ -21,95 +21,22 @@
         - /opt/nginx/logs
 
     - name: Create Nginx deployment yaml
-      copy:
+      template:
+        src: templates/nginx-deployment.yml.j2
         dest: /opt/nginx/nginx-deployment.yml
-        content: |
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: nginx
-            namespace: default
-          spec:
-            replicas: 1
-            selector:
-              matchLabels:
-                app: nginx
-            template:
-              metadata:
-                labels:
-                  app: nginx
-              spec:
-                containers:
-                - name: nginx
-                  image: nginx:1.24@sha256:f2f5da93ac629d6afd25f0dd07e63c4dd944772c0f3c21e5356b67591f8a3a03
-                  ports:
-                  - containerPort: 80
-                  volumeMounts:
-                  - name: nginx-conf
-                    mountPath: /etc/nginx/conf.d
-                  - name: nginx-html
-                    mountPath: /usr/share/nginx/html
-                  - name: nginx-logs
-                    mountPath: /var/log/nginx
-                volumes:
-                - name: nginx-conf
-                  hostPath:
-                    path: /opt/nginx/conf
-                - name: nginx-html
-                  hostPath:
-                    path: /opt/nginx/html
-                - name: nginx-logs
-                  hostPath:
-                    path: /opt/nginx/logs
-          ---
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: nginx
-            namespace: default
-          spec:
-            type: NodePort
-            ports:
-            - name: http
-              port: 80
-              targetPort: 80
-              nodePort: 30080
-            selector:
-              app: nginx
+        mode: '0644'
 
     - name: Create default nginx config
-      copy:
+      template:
+        src: templates/default.conf.j2
         dest: /opt/nginx/conf/default.conf
-        content: |
-          server {
-              listen       80;
-              server_name  localhost;
-
-              location / {
-                  root   /usr/share/nginx/html;
-                  index  index.html;
-              }
-
-              error_page   500 502 503 504  /50x.html;
-              location = /50x.html {
-                  root   /usr/share/nginx/html;
-              }
-          }
+        mode: '0644'
 
     - name: Create test page
-      copy:
+      template:
+        src: templates/index.html.j2
         dest: /opt/nginx/html/index.html
-        content: |
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <title>Welcome to Nginx (AMD64)</title>
-          </head>
-          <body>
-              <h1>Welcome to Nginx (AMD64)</h1>
-              <p>If you see this page, the Nginx container is working on AMD64 architecture.</p>
-          </body>
-          </html>
+        mode: '0644'
 
     - name: Deploy Nginx to K3s
       command: kubectl apply -f /opt/nginx/nginx-deployment.yml
@@ -131,9 +58,13 @@
 
     - name: Show Nginx access info
       debug:
-        msg: 
+        msg:
           - "Nginx is running (AMD64)"
           - "Access URL: http://YOUR_SERVER_IP:30080"
           - "Configuration directory: /opt/nginx/conf"
           - "HTML directory: /opt/nginx/html"
-          - "Logs directory: /opt/nginx/logs" 
+          - "Logs directory: /opt/nginx/logs"
+
+    - name: Delete Nginx deployment and service
+      command: kubectl delete -f /opt/nginx/nginx-deployment.yml
+      failed_when: false

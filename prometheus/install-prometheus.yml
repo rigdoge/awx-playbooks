@@ -8,7 +8,7 @@
         url: https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl
         dest: /usr/local/bin/kubectl
         mode: '0755'
-      ignore_errors: yes
+      failed_when: false
 
     - name: Create directories
       file:
@@ -244,4 +244,4 @@
           - "Grafana UI: http://YOUR_SERVER_IP:30300"
           - "Grafana credentials:"
           - "  Username: admin"
-          - "  Password: admin123" 
+          - "  Password: admin123"

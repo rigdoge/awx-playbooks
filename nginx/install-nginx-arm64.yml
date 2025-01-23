@@ -8,7 +8,7 @@
         url: https://dl.k8s.io/release/v1.28.0/bin/linux/arm64/kubectl
         dest: /usr/local/bin/kubectl
         mode: '0755'
-      ignore_errors: yes
+      failed_when: false
 
     - name: Create Nginx directories
       file:
@@ -21,9 +21,10 @@
         - /opt/nginx/logs
 
     - name: Create Nginx deployment yaml
-      copy:
-        dest: /opt/nginx/nginx-deployment.yml
-        content: |
+      kubernetes.core.k8s:
+        state: present
+        mode: '0644'
+        definition:
           apiVersion: apps/v1
           kind: Deployment
           metadata:
@@ -61,7 +62,11 @@
                 - name: nginx-logs
                   hostPath:
                     path: /opt/nginx/logs
-          ---
+
+    - name: Create Nginx service
+      kubernetes.core.k8s:
+        state: present
+        definition:
           apiVersion: v1
           kind: Service
           metadata:
@@ -78,38 +83,16 @@
               app: nginx
 
     - name: Create default nginx config
-      copy:
+      template:
+        src: templates/default.conf.j2
         dest: /opt/nginx/conf/default.conf
-        content: |
-          server {
-              listen       80;
-              server_name  localhost;
-
-              location / {
-                  root   /usr/share/nginx/html;
-                  index  index.html;
-              }
-
-              error_page   500 502 503 504  /50x.html;
-              location = /50x.html {
-                  root   /usr/share/nginx/html;
-              }
-          }
+        mode: '0644'
 
     - name: Create test page
-      copy:
+      template:
+        src: templates/index.html.j2
         dest: /opt/nginx/html/index.html
-        content: |
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <title>Welcome to Nginx (ARM64)</title>
-          </head>
-          <body>
-              <h1>Welcome to Nginx (ARM64)</h1>
-              <p>If you see this page, the Nginx container is working on ARM64 architecture.</p>
-          </body>
-          </html>
+        mode: '0644'
 
     - name: Deploy Nginx to K3s
       command: kubectl apply -f /opt/nginx/nginx-deployment.yml
@@ -131,9 +114,9 @@
 
     - name: Show Nginx access info
       debug:
-        msg: 
+        msg:
           - "Nginx is running (ARM64)"
           - "Access URL: http://YOUR_SERVER_IP:30080"
           - "Configuration directory: /opt/nginx/conf"
           - "HTML directory: /opt/nginx/html"
-          - "Logs directory: /opt/nginx/logs" 
+          - "Logs directory: /opt/nginx/logs"

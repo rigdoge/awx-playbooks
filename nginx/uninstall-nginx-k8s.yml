@@ -61,4 +61,4 @@
 
     - name: Show cleanup status
       debug:
-        msg: "Nginx has been uninstalled from Kubernetes" 
+        msg: "Nginx has been uninstalled from Kubernetes"

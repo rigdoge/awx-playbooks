@@ -20,4 +20,4 @@
 
     - name: Show cleanup status
       debug:
-        msg: "RabbitMQ Docker container has been uninstalled and cleaned up" 
+        msg: "RabbitMQ Docker container has been uninstalled and cleaned up"

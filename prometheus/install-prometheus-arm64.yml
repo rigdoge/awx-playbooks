@@ -8,7 +8,7 @@
         url: https://dl.k8s.io/release/v1.28.0/bin/linux/arm64/kubectl
         dest: /usr/local/bin/kubectl
         mode: '0755'
-      ignore_errors: yes
+      failed_when: false
 
     - name: Create directories
       file:
@@ -133,7 +133,9 @@
               spec:
                 containers:
                 - name: alertmanager
-                  image: prom/alertmanager:v0.26.0@sha256:d6b81680b958eb16e9c230f9393f9c6f35e0f3d2f0e94e8a14e50f0674c4ad95
+                  image: >-
+                    prom/alertmanager:v0.26.0@
+                    sha256:d6b81680b958eb16e9c230f9393f9c6f35e0f3d2f0e94e8a14e50f0674c4ad95
                   ports:
                   - containerPort: 9093
                   volumeMounts:
@@ -244,4 +246,4 @@
           - "Grafana UI: http://YOUR_SERVER_IP:30300"
           - "Grafana credentials:"
           - "  Username: admin"
-          - "  Password: admin123" 
+          - "  Password: admin123"

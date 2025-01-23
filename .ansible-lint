@@ -1,0 +1,21 @@
+exclude_paths:
+  - .git/
+  - .github/
+  - scripts/
+
+skip_list:
+  - '204'  # Lines should be no longer than 120 chars
+  - '301'  # Commands should not change things if nothing needs doing
+  - '303'  # Using command rather than module
+  - '306'  # Shells that use pipes should set the pipefail option
+  - fqcn[action-core]
+  - fqcn[action]
+
+warn_list:
+  - '208'  # File permissions unset or incorrect
+  - '503'  # Tasks that run when changed should likely be handlers
+  - yaml[line-length]
+  - yaml[trailing-spaces]
+  - yaml[new-line-at-end-of-file]
+  - risky-file-permissions
+  - ignore-errors

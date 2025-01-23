@@ -5,7 +5,7 @@
   tasks:
     - name: Delete Prometheus Stack deployment
       command: kubectl delete -f /opt/prometheus/prometheus-deployment.yml
-      ignore_errors: yes
+      failed_when: false
 
     - name: Wait for pods to be removed
       command: kubectl get pods -n default -l 'app in (prometheus,alertmanager,grafana)'
@@ -13,7 +13,7 @@
       until: pod_status.rc != 0 or pod_status.stdout == ""
       retries: 30
       delay: 10
-      ignore_errors: yes
+      failed_when: false
 
     - name: Remove Prometheus directories
       file:
@@ -22,4 +22,4 @@
 
     - name: Show cleanup status
       debug:
-        msg: "Prometheus Stack (ARM64) has been uninstalled and cleaned up" 
+        msg: "Prometheus Stack (ARM64) has been uninstalled and cleaned up"

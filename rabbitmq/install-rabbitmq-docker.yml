@@ -23,7 +23,9 @@
 
     - name: Add Docker repository
       apt_repository:
-        repo: deb [arch={{ ansible_architecture }}] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+        repo: >-
+          deb [arch={{ ansible_architecture }}] https://download.docker.com/linux/ubuntu
+          {{ ansible_distribution_release }} stable
         state: present
       when: ansible_os_family == "Debian"
 
@@ -44,13 +46,10 @@
         - /opt/rabbitmq/config
 
     - name: Create RabbitMQ config
-      copy:
+      template:
+        src: templates/rabbitmq.conf.j2
         dest: /opt/rabbitmq/config/rabbitmq.conf
-        content: |
-          default_user = admin
-          default_pass = admin123
-          management.tcp.port = 15672
-          management.tcp.ip = 0.0.0.0
+        mode: '0644'
 
     - name: Pull RabbitMQ image
       docker_image:
@@ -81,35 +80,35 @@
       until: result.status == 200
       retries: 30
       delay: 10
-      ignore_errors: yes
+      failed_when: false
 
     - name: Create virtual host
       command: >
-        docker exec rabbitmq 
+        docker exec rabbitmq
         rabbitmqctl add_vhost /development
-      ignore_errors: yes
+      failed_when: false
 
     - name: Create development user
       command: >
-        docker exec rabbitmq 
+        docker exec rabbitmq
         rabbitmqctl add_user dev dev123
-      ignore_errors: yes
+      failed_when: false
 
     - name: Set permissions for development user
       command: >
-        docker exec rabbitmq 
+        docker exec rabbitmq
         rabbitmqctl set_permissions -p /development dev ".*" ".*" ".*"
-      ignore_errors: yes
+      failed_when: false
 
     - name: Enable management plugin for dev user
       command: >
-        docker exec rabbitmq 
+        docker exec rabbitmq
         rabbitmqctl set_user_tags dev management
-      ignore_errors: yes
+      failed_when: false
 
     - name: Get cluster status
       command: >
-        docker exec rabbitmq 
+        docker exec rabbitmq
         rabbitmqctl cluster_status
       register: cluster_status
 
@@ -119,7 +118,7 @@
 
     - name: Show RabbitMQ connection info
       debug:
-        msg: 
+        msg:
           - "RabbitMQ is running (Docker)"
           - "Management UI: http://YOUR_SERVER_IP:15672"
           - "AMQP Port: 5672"
@@ -129,4 +128,4 @@
           - "Development credentials:"
           - "  Username: dev"
           - "  Password: dev123"
-          - "  Virtual Host: /development" 
+          - "  Virtual Host: /development"

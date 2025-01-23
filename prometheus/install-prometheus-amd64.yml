@@ -8,7 +8,7 @@
         url: https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl
         dest: /usr/local/bin/kubectl
         mode: '0755'
-      ignore_errors: yes
+      failed_when: false
 
     - name: Create directories
       file:
@@ -21,59 +21,22 @@
         - /opt/prometheus/grafana
 
     - name: Create prometheus config
-      copy:
+      template:
+        src: templates/prometheus.yml.j2
         dest: /opt/prometheus/prometheus/prometheus.yml
-        content: |
-          global:
-            scrape_interval: 15s
-            evaluation_interval: 15s
-
-          alerting:
-            alertmanagers:
-            - static_configs:
-              - targets:
-                - alertmanager:9093
-
-          rule_files:
-            - /etc/prometheus/rules/*.yml
-
-          scrape_configs:
-            - job_name: 'prometheus'
-              static_configs:
-              - targets: ['localhost:9090']
-
-            - job_name: 'kubernetes-nodes'
-              kubernetes_sd_configs:
-              - role: node
-              relabel_configs:
-              - source_labels: [__address__]
-                regex: '(.*):10250'
-                replacement: '${1}:9100'
-                target_label: __address__
-                action: replace
+        mode: '0644'
 
     - name: Create alertmanager config
-      copy:
+      template:
+        src: templates/alertmanager.yml.j2
         dest: /opt/prometheus/alertmanager/alertmanager.yml
-        content: |
-          global:
-            resolve_timeout: 5m
-
-          route:
-            group_by: ['alertname']
-            group_wait: 10s
-            group_interval: 10s
-            repeat_interval: 1h
-            receiver: 'web.hook'
-          receivers:
-          - name: 'web.hook'
-            webhook_configs:
-            - url: 'http://127.0.0.1:5001/'
+        mode: '0644'
 
     - name: Create Prometheus deployment yaml
-      copy:
-        dest: /opt/prometheus/prometheus-deployment.yml
-        content: |
+      kubernetes.core.k8s:
+        state: present
+        mode: '0644'
+        definition:
           apiVersion: apps/v1
           kind: Deployment
           metadata:
@@ -101,7 +64,11 @@
                 - name: prometheus-config
                   hostPath:
                     path: /opt/prometheus/prometheus
-          ---
+
+    - name: Create Prometheus service
+      kubernetes.core.k8s:
+        state: present
+        definition:
           apiVersion: v1
           kind: Service
           metadata:
@@ -115,7 +82,11 @@
               nodePort: 30090
             selector:
               app: prometheus
-          ---
+
+    - name: Create AlertManager deployment
+      kubernetes.core.k8s:
+        state: present
+        definition:
           apiVersion: apps/v1
           kind: Deployment
           metadata:
@@ -133,7 +104,9 @@
               spec:
                 containers:
                 - name: alertmanager
-                  image: prom/alertmanager:v0.26.0@sha256:d7de3e6917551f71470c9b0a87b680847a0b1ffb3fcf3e8c9b4c90f87c7e0c86
+                  image: >-
+                    prom/alertmanager:v0.26.0@
+                    sha256:d7de3e6917551f71470c9b0a87b680847a0b1ffb3fcf3e8c9b4c90f87c7e0c86
                   ports:
                   - containerPort: 9093
                   volumeMounts:
@@ -143,7 +116,11 @@
                 - name: alertmanager-config
                   hostPath:
                     path: /opt/prometheus/alertmanager
-          ---
+
+    - name: Create AlertManager service
+      kubernetes.core.k8s:
+        state: present
+        definition:
           apiVersion: v1
           kind: Service
           metadata:
@@ -157,7 +134,11 @@
               nodePort: 30093
             selector:
               app: alertmanager
-          ---
+
+    - name: Create Grafana deployment
+      kubernetes.core.k8s:
+        state: present
+        definition:
           apiVersion: apps/v1
           kind: Deployment
           metadata:
@@ -188,7 +169,11 @@
                 - name: grafana-storage
                   hostPath:
                     path: /opt/prometheus/grafana
-          ---
+
+    - name: Create Grafana service
+      kubernetes.core.k8s:
+        state: present
+        definition:
           apiVersion: v1
           kind: Service
           metadata:
@@ -244,4 +229,4 @@
           - "Grafana UI: http://YOUR_SERVER_IP:30300"
           - "Grafana credentials:"
           - "  Username: admin"
-          - "  Password: admin123" 
+          - "  Password: admin123"

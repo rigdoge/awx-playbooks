@@ -8,7 +8,7 @@
         url: https://dl.k8s.io/release/v1.28.0/bin/linux/arm64/kubectl
         dest: /usr/local/bin/kubectl
         mode: '0755'
-      ignore_errors: yes
+      failed_when: false
 
     - name: Create RabbitMQ directories
       file:
@@ -40,7 +40,9 @@
               spec:
                 containers:
                 - name: rabbitmq
-                  image: rabbitmq:3.13.7-management@sha256:c6d50a58d7bb6c4a2c4e5b7c0e8c4a4c8aa17d7c0e7b9c9b3cd0a0c2f4c9c9c9
+                  image: >-
+                    rabbitmq:3.13.7-management@
+                    sha256:c6d50a58d7bb6c4a2c4e5b7c0e8c4a4c8aa17d7c0e7b9c9b3cd0a0c2f4c9c9c9
                   ports:
                   - containerPort: 5672
                   - containerPort: 15672
@@ -99,35 +101,35 @@
       until: result.status == 200
       retries: 30
       delay: 10
-      ignore_errors: yes
+      failed_when: false
 
     - name: Create virtual host
       command: >
-        kubectl exec -n default deployment/rabbitmq -- 
+        kubectl exec -n default deployment/rabbitmq --
         rabbitmqctl add_vhost /development
-      ignore_errors: yes
+      failed_when: false
 
     - name: Create development user
       command: >
-        kubectl exec -n default deployment/rabbitmq -- 
+        kubectl exec -n default deployment/rabbitmq --
         rabbitmqctl add_user dev dev123
-      ignore_errors: yes
+      failed_when: false
 
     - name: Set permissions for development user
       command: >
-        kubectl exec -n default deployment/rabbitmq -- 
+        kubectl exec -n default deployment/rabbitmq --
         rabbitmqctl set_permissions -p /development dev ".*" ".*" ".*"
-      ignore_errors: yes
+      failed_when: false
 
     - name: Enable management plugin for dev user
       command: >
-        kubectl exec -n default deployment/rabbitmq -- 
+        kubectl exec -n default deployment/rabbitmq --
         rabbitmqctl set_user_tags dev management
-      ignore_errors: yes
+      failed_when: false
 
     - name: Get cluster status
       command: >
-        kubectl exec -n default deployment/rabbitmq -- 
+        kubectl exec -n default deployment/rabbitmq --
         rabbitmqctl cluster_status
       register: cluster_status
 
@@ -137,7 +139,7 @@
 
     - name: Show RabbitMQ connection info
       debug:
-        msg: 
+        msg:
           - "RabbitMQ is running (ARM64)"
           - "Management UI: http://YOUR_SERVER_IP:31672"
           - "AMQP Port: 30672"
@@ -147,4 +149,4 @@
           - "Development credentials:"
           - "  Username: dev"
           - "  Password: dev123"
-          - "  Virtual Host: /development" 
+          - "  Virtual Host: /development"

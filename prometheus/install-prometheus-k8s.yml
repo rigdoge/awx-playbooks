@@ -1,28 +1,21 @@
 ---
-- name: Deploy Prometheus Stack on Kubernetes
+- name: 安装 Prometheus Stack
   hosts: localhost
-  become: yes
+  gather_facts: false
   tasks:
-    - name: Create directories
+    - name: 创建必要的目录
       file:
         path: "{{ item }}"
         state: directory
         mode: '0755'
-      with_items:
-        - /opt/prometheus/k8s/prometheus
-        - /opt/prometheus/k8s/alertmanager
-        - /opt/prometheus/k8s/grafana
+      loop:
+        - /opt/prometheus/prometheus
+        - /opt/prometheus/alertmanager
+        - /opt/prometheus/grafana
 
-    - name: Create namespace
-      k8s:
-        name: monitoring
-        api_version: v1
-        kind: Namespace
-        state: present
-
-    - name: Create prometheus config
+    - name: 创建 Prometheus 配置文件
       copy:
-        dest: /opt/prometheus/k8s/prometheus/prometheus.yml
+        dest: /opt/prometheus/prometheus/prometheus.yml
         content: |
           global:
             scrape_interval: 15s
@@ -30,9 +23,9 @@
 
           alerting:
             alertmanagers:
-            - static_configs:
-              - targets:
-                - alertmanager.monitoring.svc:9093
+              - static_configs:
+                  - targets:
+                      - alertmanager:9093
 
           rule_files:
             - /etc/prometheus/rules/*.yml
@@ -40,21 +33,15 @@
           scrape_configs:
             - job_name: 'prometheus'
               static_configs:
-              - targets: ['localhost:9090']
+                - targets: ['localhost:9090']
 
-            - job_name: 'kubernetes-nodes'
-              kubernetes_sd_configs:
-              - role: node
-              relabel_configs:
-              - source_labels: [__address__]
-                regex: '(.*):10250'
-                replacement: '${1}:9100'
-                target_label: __address__
-                action: replace
+            - job_name: 'node'
+              static_configs:
+                - targets: ['node-exporter:9100']
 
-    - name: Create alertmanager config
+    - name: 创建 AlertManager 配置文件
       copy:
-        dest: /opt/prometheus/k8s/alertmanager/alertmanager.yml
+        dest: /opt/prometheus/alertmanager/alertmanager.yml
         content: |
           global:
             resolve_timeout: 5m
@@ -65,42 +52,21 @@
             group_interval: 10s
             repeat_interval: 1h
             receiver: 'web.hook'
+
           receivers:
-          - name: 'web.hook'
-            webhook_configs:
-            - url: 'http://127.0.0.1:5001/'
+            - name: 'web.hook'
+              webhook_configs:
+                - url: 'http://127.0.0.1:5001/'
 
-    - name: Create ConfigMaps
-      k8s:
-        state: present
-        definition:
-          apiVersion: v1
-          kind: ConfigMap
-          metadata:
-            name: prometheus-config
-            namespace: monitoring
-          data:
-            prometheus.yml: |
-              {{ lookup('file', '/opt/prometheus/k8s/prometheus/prometheus.yml') }}
-          ---
-          apiVersion: v1
-          kind: ConfigMap
-          metadata:
-            name: alertmanager-config
-            namespace: monitoring
-          data:
-            alertmanager.yml: |
-              {{ lookup('file', '/opt/prometheus/k8s/alertmanager/alertmanager.yml') }}
-
-    - name: Create Prometheus deployment
-      k8s:
-        state: present
-        definition:
+    - name: 创建 Prometheus Stack 部署文件
+      copy:
+        dest: /opt/prometheus/prometheus-deployment.yml
+        content: |
           apiVersion: apps/v1
           kind: Deployment
           metadata:
             name: prometheus
-            namespace: monitoring
+            namespace: default
           spec:
             replicas: 1
             selector:
@@ -117,26 +83,36 @@
                   ports:
                   - containerPort: 9090
                   volumeMounts:
-                  - name: prometheus-config
+                  - name: config
                     mountPath: /etc/prometheus/
-                  - name: prometheus-storage
+                  - name: storage
                     mountPath: /prometheus/
                 volumes:
-                - name: prometheus-config
+                - name: config
                   configMap:
                     name: prometheus-config
-                - name: prometheus-storage
+                - name: storage
                   emptyDir: {}
-
-    - name: Create Alertmanager deployment
-      k8s:
-        state: present
-        definition:
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: prometheus
+            namespace: default
+          spec:
+            type: NodePort
+            ports:
+            - port: 9090
+              targetPort: 9090
+              nodePort: 30090
+            selector:
+              app: prometheus
+          ---
           apiVersion: apps/v1
           kind: Deployment
           metadata:
             name: alertmanager
-            namespace: monitoring
+            namespace: default
           spec:
             replicas: 1
             selector:
@@ -149,26 +125,36 @@
               spec:
                 containers:
                 - name: alertmanager
-                  image: prom/alertmanager:v0.26.0
+                  image: prom/alertmanager:v0.25.0
                   ports:
                   - containerPort: 9093
                   volumeMounts:
-                  - name: alertmanager-config
+                  - name: config
                     mountPath: /etc/alertmanager/
                 volumes:
-                - name: alertmanager-config
+                - name: config
                   configMap:
                     name: alertmanager-config
-
-    - name: Create Grafana deployment
-      k8s:
-        state: present
-        definition:
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: alertmanager
+            namespace: default
+          spec:
+            type: NodePort
+            ports:
+            - port: 9093
+              targetPort: 9093
+              nodePort: 30093
+            selector:
+              app: alertmanager
+          ---
           apiVersion: apps/v1
           kind: Deployment
           metadata:
             name: grafana
-            namespace: monitoring
+            namespace: default
           spec:
             replicas: 1
             selector:
@@ -185,52 +171,22 @@
                   ports:
                   - containerPort: 3000
                   env:
+                  - name: GF_SECURITY_ADMIN_USER
+                    value: "admin"
                   - name: GF_SECURITY_ADMIN_PASSWORD
                     value: "admin123"
                   volumeMounts:
-                  - name: grafana-storage
+                  - name: storage
                     mountPath: /var/lib/grafana
                 volumes:
-                - name: grafana-storage
+                - name: storage
                   emptyDir: {}
-
-    - name: Create Services
-      k8s:
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: prometheus
-            namespace: monitoring
-          spec:
-            type: NodePort
-            ports:
-            - port: 9090
-              targetPort: 9090
-              nodePort: 30090
-            selector:
-              app: prometheus
-          ---
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: alertmanager
-            namespace: monitoring
-          spec:
-            type: NodePort
-            ports:
-            - port: 9093
-              targetPort: 9093
-              nodePort: 30093
-            selector:
-              app: alertmanager
           ---
           apiVersion: v1
           kind: Service
           metadata:
             name: grafana
-            namespace: monitoring
+            namespace: default
           spec:
             type: NodePort
             ports:
@@ -240,37 +196,79 @@
             selector:
               app: grafana
 
-    - name: Wait for deployments
-      k8s_info:
+    - name: 创建 ConfigMap
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: prometheus-config
+            namespace: default
+          data:
+            prometheus.yml: |
+              {{ lookup('file', '/opt/prometheus/prometheus/prometheus.yml') | indent(2) }}
+
+    - name: 创建 AlertManager ConfigMap
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: alertmanager-config
+            namespace: default
+          data:
+            alertmanager.yml: |
+              {{ lookup('file', '/opt/prometheus/alertmanager/alertmanager.yml') | indent(2) }}
+
+    - name: 部署 Prometheus Stack
+      kubernetes.core.k8s:
+        state: present
+        src: /opt/prometheus/prometheus-deployment.yml
+
+    - name: 等待 Prometheus 部署就绪
+      kubernetes.core.k8s_info:
         kind: Deployment
-        name: "{{ item }}"
-        namespace: monitoring
+        name: prometheus
+        namespace: default
         wait: yes
         wait_timeout: 300
-      with_items:
-        - prometheus
-        - alertmanager
-        - grafana
+        wait_condition:
+          type: Available
+          status: "True"
 
-    - name: Get pod status
-      k8s_info:
-        kind: Pod
-        namespace: monitoring
-        label_selectors:
-          - app in (prometheus,alertmanager,grafana)
-      register: pod_status
+    - name: 等待 AlertManager 部署就绪
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: alertmanager
+        namespace: default
+        wait: yes
+        wait_timeout: 300
+        wait_condition:
+          type: Available
+          status: "True"
 
-    - name: Show pod status
+    - name: 等待 Grafana 部署就绪
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: grafana
+        namespace: default
+        wait: yes
+        wait_timeout: 300
+        wait_condition:
+          type: Available
+          status: "True"
+
+    - name: 显示访问信息
       debug:
-        var: pod_status.resources
+        msg: |
+          Prometheus 已成功部署！
+          访问地址：
+          - Prometheus: http://YOUR_SERVER_IP:30090
+          - AlertManager: http://YOUR_SERVER_IP:30093
+          - Grafana: http://YOUR_SERVER_IP:30300
 
-    - name: Show connection info
-      debug:
-        msg:
-          - "Prometheus Stack is running (Kubernetes)"
-          - "Prometheus UI: http://YOUR_SERVER_IP:30090"
-          - "AlertManager UI: http://YOUR_SERVER_IP:30093"
-          - "Grafana UI: http://YOUR_SERVER_IP:30300"
-          - "Grafana credentials:"
-          - "  Username: admin"
-          - "  Password: admin123" 
+          Grafana 默认凭据：
+          - 用户名: admin
+          - 密码: admin123

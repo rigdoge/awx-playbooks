@@ -5,7 +5,7 @@
   tasks:
     - name: Delete Nginx deployment and service
       command: kubectl delete -f /opt/nginx/nginx-deployment.yml
-      ignore_errors: yes
+      failed_when: false
 
     - name: Wait for pods to be removed
       command: kubectl get pods -l app=nginx -n default
@@ -13,7 +13,7 @@
       until: pod_status.rc != 0 or pod_status.stdout == ""
       retries: 30
       delay: 10
-      ignore_errors: yes
+      failed_when: false
 
     - name: Remove Nginx directories
       file:
@@ -22,4 +22,4 @@
 
     - name: Show cleanup status
       debug:
-        msg: "Nginx (ARM64) has been uninstalled and cleaned up" 
+        msg: "Nginx (ARM64) has been uninstalled and cleaned up"
