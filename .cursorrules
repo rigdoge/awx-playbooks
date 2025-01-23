@@ -1,0 +1,162 @@
+{
+  "project": {
+    "name": "AWX Playbooks",
+    "type": "ansible",
+    "description": "自动化部署和管理服务的 Ansible playbooks 集合",
+    "language": {
+      "comments": "chinese",
+      "documentation": "chinese",
+      "commit_messages": "english"
+    }
+  },
+
+  "directory_structure": {
+    "required_dirs": [
+      "docs/architecture",
+      "docs/deployment",
+      "docs/development",
+      "docs/operations",
+      "scripts",
+      "playbooks"
+    ],
+    "required_files": [
+      "README.md",
+      "rules.md"
+    ]
+  },
+
+  "playbooks": {
+    "naming": {
+      "pattern": "^(install|uninstall)-[a-z-]+(-(arm64|amd64|docker))?\.yml$",
+      "examples": [
+        "install-rabbitmq-arm64.yml",
+        "uninstall-nginx-docker.yml"
+      ]
+    },
+    "structure": {
+      "required_sections": [
+        "name",
+        "hosts",
+        "tasks"
+      ],
+      "task_naming": "verb-object format",
+      "indentation": 2
+    },
+    "validation": {
+      "syntax_check": true,
+      "lint_check": true,
+      "idempotency_test": true
+    }
+  },
+
+  "documentation": {
+    "format": "markdown",
+    "required_sections": {
+      "README.md": [
+        "项目概述",
+        "目录结构",
+        "技术栈",
+        "环境要求",
+        "快速开始",
+        "可用的 Playbooks"
+      ],
+      "architecture": [
+        "整体架构",
+        "部署架构",
+        "组件说明",
+        "网络架构"
+      ],
+      "deployment": [
+        "环境要求",
+        "前置准备",
+        "部署流程",
+        "验证步骤"
+      ]
+    }
+  },
+
+  "security": {
+    "forbidden_patterns": [
+      "password:",
+      "token:",
+      "secret:"
+    ],
+    "required_checks": [
+      "file_permissions",
+      "env_variables",
+      "minimal_privileges"
+    ],
+    "file_permissions": {
+      "playbooks": "644",
+      "scripts": "755",
+      "config": "600"
+    }
+  },
+
+  "git": {
+    "commit_types": [
+      "feat",
+      "fix",
+      "docs",
+      "style",
+      "refactor",
+      "test",
+      "chore"
+    ],
+    "commit_format": {
+      "pattern": "^(feat|fix|docs|style|refactor|test|chore)(\\(.+\\))?: .+",
+      "example": "feat(rabbitmq): add Docker deployment support"
+    },
+    "branch_prefix": [
+      "feature/",
+      "bugfix/",
+      "hotfix/",
+      "release/"
+    ]
+  },
+
+  "deployment": {
+    "supported_architectures": [
+      "arm64",
+      "amd64"
+    ],
+    "deployment_methods": [
+      "kubernetes",
+      "docker"
+    ],
+    "services": {
+      "rabbitmq": {
+        "version": "3.13.7",
+        "ports": {
+          "amqp": 5672,
+          "management": 15672
+        }
+      },
+      "nginx": {
+        "version": "1.24",
+        "ports": {
+          "http": 80
+        }
+      },
+      "prometheus": {
+        "version": "2.45.0",
+        "ports": {
+          "web": 9090
+        }
+      }
+    }
+  },
+
+  "testing": {
+    "required_tests": [
+      "syntax_check",
+      "lint_check",
+      "idempotency_test"
+    ],
+    "environments": [
+      "development",
+      "staging",
+      "production"
+    ]
+  }
+} 
