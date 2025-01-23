@@ -1,20 +1,21 @@
 ---
 - name: Uninstall RabbitMQ Container
   hosts: localhost
+  become: yes
   tasks:
     - name: Download kubectl
       get_url:
         url: https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl
-        dest: /tmp/kubectl
+        dest: /usr/local/bin/kubectl
         mode: '0755'
       ignore_errors: yes
 
     - name: Delete RabbitMQ deployment and service
-      command: /tmp/kubectl delete -f /tmp/rabbitmq/rabbitmq-deployment.yml
+      command: kubectl delete -f /opt/rabbitmq/rabbitmq-deployment.yml
       ignore_errors: yes
 
     - name: Wait for RabbitMQ pods to be removed
-      command: /tmp/kubectl get pods -n default | grep rabbitmq
+      command: kubectl get pods -n default | grep rabbitmq
       register: pod_check
       until: pod_check.rc != 0
       retries: 30
@@ -23,7 +24,7 @@
 
     - name: Remove RabbitMQ directories
       file:
-        path: /tmp/rabbitmq
+        path: /opt/rabbitmq
         state: absent
 
     - name: Show cleanup status

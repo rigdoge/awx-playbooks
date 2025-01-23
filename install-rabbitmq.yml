@@ -1,11 +1,12 @@
 ---
 - name: Deploy RabbitMQ 3.13.7 Container
   hosts: localhost
+  become: yes
   tasks:
     - name: Download kubectl
       get_url:
         url: https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl
-        dest: /tmp/kubectl
+        dest: /usr/local/bin/kubectl
         mode: '0755'
       ignore_errors: yes
 
@@ -13,14 +14,14 @@
       file:
         path: "{{ item }}"
         state: directory
-        mode: '0777'
+        mode: '0755'
       with_items:
-        - /tmp/rabbitmq/data
-        - /tmp/rabbitmq/config
+        - /opt/rabbitmq/data
+        - /opt/rabbitmq/config
 
     - name: Create RabbitMQ deployment yaml
       copy:
-        dest: /tmp/rabbitmq/rabbitmq-deployment.yml
+        dest: /opt/rabbitmq/rabbitmq-deployment.yml
         content: |
           apiVersion: apps/v1
           kind: Deployment
@@ -56,10 +57,10 @@
                 volumes:
                 - name: rabbitmq-data
                   hostPath:
-                    path: /tmp/rabbitmq/data
+                    path: /opt/rabbitmq/data
                 - name: rabbitmq-config
                   hostPath:
-                    path: /tmp/rabbitmq/config
+                    path: /opt/rabbitmq/config
           ---
           apiVersion: v1
           kind: Service
@@ -81,10 +82,10 @@
               app: rabbitmq
 
     - name: Deploy RabbitMQ to K3s
-      command: /tmp/kubectl apply -f /tmp/rabbitmq/rabbitmq-deployment.yml
+      command: kubectl apply -f /opt/rabbitmq/rabbitmq-deployment.yml
 
     - name: Wait for RabbitMQ deployment
-      command: /tmp/kubectl rollout status deployment/rabbitmq -n default
+      command: kubectl rollout status deployment/rabbitmq -n default
       register: rollout_status
       until: rollout_status.rc == 0
       retries: 30
@@ -102,31 +103,31 @@
 
     - name: Create virtual host
       command: >
-        /tmp/kubectl exec -n default deployment/rabbitmq -- 
+        kubectl exec -n default deployment/rabbitmq -- 
         rabbitmqctl add_vhost /development
       ignore_errors: yes
 
     - name: Create development user
       command: >
-        /tmp/kubectl exec -n default deployment/rabbitmq -- 
+        kubectl exec -n default deployment/rabbitmq -- 
         rabbitmqctl add_user dev dev123
       ignore_errors: yes
 
     - name: Set permissions for development user
       command: >
-        /tmp/kubectl exec -n default deployment/rabbitmq -- 
+        kubectl exec -n default deployment/rabbitmq -- 
         rabbitmqctl set_permissions -p /development dev ".*" ".*" ".*"
       ignore_errors: yes
 
     - name: Enable management plugin for dev user
       command: >
-        /tmp/kubectl exec -n default deployment/rabbitmq -- 
+        kubectl exec -n default deployment/rabbitmq -- 
         rabbitmqctl set_user_tags dev management
       ignore_errors: yes
 
     - name: Get cluster status
       command: >
-        /tmp/kubectl exec -n default deployment/rabbitmq -- 
+        kubectl exec -n default deployment/rabbitmq -- 
         rabbitmqctl cluster_status
       register: cluster_status
 
