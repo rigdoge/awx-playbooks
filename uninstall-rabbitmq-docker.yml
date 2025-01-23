@@ -1,0 +1,23 @@
+---
+- name: Uninstall RabbitMQ Container with Docker
+  hosts: localhost
+  become: yes
+  tasks:
+    - name: Stop and remove RabbitMQ container
+      docker_container:
+        name: rabbitmq
+        state: absent
+
+    - name: Remove RabbitMQ image
+      docker_image:
+        name: rabbitmq:3.13.7-management
+        state: absent
+
+    - name: Remove RabbitMQ directories
+      file:
+        path: /opt/rabbitmq
+        state: absent
+
+    - name: Show cleanup status
+      debug:
+        msg: "RabbitMQ Docker container has been uninstalled and cleaned up" 
