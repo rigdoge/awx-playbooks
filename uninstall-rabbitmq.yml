@@ -1,25 +1,24 @@
 ---
-- name: Uninstall RabbitMQ
-  hosts: all
-  become: yes
+- name: Uninstall RabbitMQ Container
+  hosts: localhost
   tasks:
     - name: Delete RabbitMQ deployment and service
       command: kubectl delete -f /opt/rabbitmq/rabbitmq-deployment.yml
       ignore_errors: yes
 
-    - name: Wait for pods to be removed
-      command: kubectl wait --for=delete pod -l app=rabbitmq -n default
+    - name: Wait for RabbitMQ pods to be removed
+      command: kubectl get pods -n default | grep rabbitmq
+      register: pod_check
+      until: pod_check.rc != 0
+      retries: 30
+      delay: 10
       ignore_errors: yes
 
-    - name: Remove RabbitMQ data directories
+    - name: Remove RabbitMQ directories
       file:
-        path: "{{ item }}"
+        path: /opt/rabbitmq
         state: absent
-      with_items:
-        - /opt/rabbitmq/data
-        - /opt/rabbitmq/config
-        - /opt/rabbitmq/rabbitmq-deployment.yml
 
     - name: Show cleanup status
       debug:
-        msg: "RabbitMQ has been uninstalled and data cleaned up" 
+        msg: "RabbitMQ has been uninstalled and cleaned up" 
