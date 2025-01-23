@@ -40,7 +40,9 @@
               spec:
                 containers:
                   - name: rabbitmq
-                    image: rabbitmq:3.13.7-management@sha256:a6d5e08f5d5f1d6f8f9e56e1b6f0c4f6c2c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0
+                    image: >-
+                      rabbitmq:3.13.7-management@
+                      sha256:a6d5e08f5d5f1d6f8f9e56e1b6f0c4f6c2c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0
                     ports:
                       - containerPort: 5672
                       - containerPort: 15672

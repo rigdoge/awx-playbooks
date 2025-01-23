@@ -53,7 +53,9 @@
               spec:
                 containers:
                   - name: prometheus
-                    image: prom/prometheus:v2.45.0@sha256:5d7379875698f88b95a0f2776d72962c1e9d7f385d600c1338faa4e5b82c3a91
+                    image: >-
+                      prom/prometheus:v2.45.0@
+                      sha256:5d7379875698f88b95a0f2776d72962c1e9d7f385d600c1338faa4e5b82c3a91
                     ports:
                       - containerPort: 9090
                     volumeMounts:
@@ -103,7 +105,9 @@
               spec:
                 containers:
                   - name: alertmanager
-                    image: prom/alertmanager:v0.26.0@sha256:d7de3e6917551f71470c9b0a87b680847a0b1ffb3fcf3e8c9b4c90f87c7e0c86
+                    image: >-
+                      prom/alertmanager:v0.26.0@
+                      sha256:d7de3e6917551f71470c9b0a87b680847a0b1ffb3fcf3e8c9b4c90f87c7e0c86
                     ports:
                       - containerPort: 9093
                     volumeMounts:
@@ -153,7 +157,9 @@
               spec:
                 containers:
                   - name: grafana
-                    image: grafana/grafana:10.2.0@sha256:b3c23a4b5f13e34c6574e0f6b0fbb4579d2f92bac6f24d0e467ac2e6cdf1e815
+                    image: >-
+                      grafana/grafana:10.2.0@
+                      sha256:b3c23a4b5f13e34c6574e0f6b0fbb4579d2f92bac6f24d0e467ac2e6cdf1e815
                     ports:
                       - containerPort: 3000
                     env:

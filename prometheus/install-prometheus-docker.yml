@@ -116,9 +116,9 @@
       delay: 10
       failed_when: false
       with_items:
-        - { name: "Prometheus", port: "9090" }
-        - { name: "Alertmanager", port: "9093" }
-        - { name: "Grafana", port: "3000" }
+        - {name: "Prometheus", port: "9090"}
+        - {name: "Alertmanager", port: "9093"}
+        - {name: "Grafana", port: "3000"}
 
     - name: Show connection info
       debug:
