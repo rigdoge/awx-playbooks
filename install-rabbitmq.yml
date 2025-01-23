@@ -1,0 +1,47 @@
+---
+- name: Deploy RabbitMQ 3.13.7 Container
+  hosts: all
+  become: yes
+  tasks:
+    - name: Create RabbitMQ directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      with_items:
+        - /opt/rabbitmq/data
+        - /opt/rabbitmq/config
+
+    - name: Deploy RabbitMQ container
+      community.docker.docker_container:
+        name: rabbitmq
+        image: rabbitmq:3.13.7-management
+        state: started
+        restart_policy: always
+        ports:
+          - "5672:5672"    # AMQP protocol
+          - "15672:15672"  # Management UI
+        env:
+          RABBITMQ_DEFAULT_USER: "admin"
+          RABBITMQ_DEFAULT_PASS: "admin123"
+        volumes:
+          - /opt/rabbitmq/data:/var/lib/rabbitmq
+          - /opt/rabbitmq/config:/etc/rabbitmq
+        
+    - name: Wait for RabbitMQ to be ready
+      uri:
+        url: http://localhost:15672
+        status_code: 200
+      register: result
+      until: result.status == 200
+      retries: 30
+      delay: 10
+      ignore_errors: yes
+
+    - name: Show RabbitMQ connection info
+      debug:
+        msg: 
+          - "RabbitMQ is running"
+          - "Management UI: http://localhost:15672"
+          - "Username: admin"
+          - "Password: admin123" 
