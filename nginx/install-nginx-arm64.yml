@@ -2,6 +2,28 @@
 - name: Install Nginx using K3s (ARM64)
   hosts: localhost
   become: yes
+  gather_facts: yes
+  pre_tasks:
+    - name: Check if sudo is installed
+      raw: which sudo
+      register: sudo_check
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Install sudo if not present (Debian/Ubuntu)
+      raw: apt-get update && apt-get install -y sudo
+      when: sudo_check.rc != 0 and ansible_os_family == "Debian"
+      ignore_errors: yes
+
+    - name: Install sudo if not present (RedHat/CentOS)
+      raw: yum install -y sudo
+      when: sudo_check.rc != 0 and ansible_os_family == "RedHat"
+      ignore_errors: yes
+
+    - name: Verify sudo is installed
+      raw: which sudo
+      changed_when: false
+      
   tasks:
     - name: Download kubectl
       get_url:
