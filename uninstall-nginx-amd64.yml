@@ -1,0 +1,25 @@
+---
+- name: Uninstall Nginx from K3s (AMD64)
+  hosts: localhost
+  become: yes
+  tasks:
+    - name: Delete Nginx deployment and service
+      command: kubectl delete -f /opt/nginx/nginx-deployment.yml
+      ignore_errors: yes
+
+    - name: Wait for pods to be removed
+      command: kubectl get pods -l app=nginx -n default
+      register: pod_status
+      until: pod_status.rc != 0 or pod_status.stdout == ""
+      retries: 30
+      delay: 10
+      ignore_errors: yes
+
+    - name: Remove Nginx directories
+      file:
+        path: /opt/nginx
+        state: absent
+
+    - name: Show cleanup status
+      debug:
+        msg: "Nginx (AMD64) has been uninstalled and cleaned up" 
