@@ -12,29 +12,81 @@
         - /opt/rabbitmq/data
         - /opt/rabbitmq/config
 
-    - name: Pull RabbitMQ image
-      command: docker pull rabbitmq:3.13.7-management
-      
-    - name: Stop and remove existing container if exists
-      command: docker rm -f rabbitmq
-      ignore_errors: yes
+    - name: Create RabbitMQ deployment yaml
+      copy:
+        dest: /opt/rabbitmq/rabbitmq-deployment.yml
+        content: |
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: rabbitmq
+            namespace: default
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: rabbitmq
+            template:
+              metadata:
+                labels:
+                  app: rabbitmq
+              spec:
+                containers:
+                - name: rabbitmq
+                  image: rabbitmq:3.13.7-management
+                  ports:
+                  - containerPort: 5672
+                  - containerPort: 15672
+                  env:
+                  - name: RABBITMQ_DEFAULT_USER
+                    value: "admin"
+                  - name: RABBITMQ_DEFAULT_PASS
+                    value: "admin123"
+                  volumeMounts:
+                  - name: rabbitmq-data
+                    mountPath: /var/lib/rabbitmq
+                  - name: rabbitmq-config
+                    mountPath: /etc/rabbitmq
+                volumes:
+                - name: rabbitmq-data
+                  hostPath:
+                    path: /opt/rabbitmq/data
+                - name: rabbitmq-config
+                  hostPath:
+                    path: /opt/rabbitmq/config
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: rabbitmq
+            namespace: default
+          spec:
+            type: NodePort
+            ports:
+            - name: amqp
+              port: 5672
+              targetPort: 5672
+              nodePort: 30672
+            - name: management
+              port: 15672
+              targetPort: 15672
+              nodePort: 31672
+            selector:
+              app: rabbitmq
 
-    - name: Deploy RabbitMQ container
-      command: >
-        docker run -d 
-        --name rabbitmq 
-        --restart always 
-        -p 5672:5672 
-        -p 15672:15672 
-        -e RABBITMQ_DEFAULT_USER=admin 
-        -e RABBITMQ_DEFAULT_PASS=admin123 
-        -v /opt/rabbitmq/data:/var/lib/rabbitmq 
-        -v /opt/rabbitmq/config:/etc/rabbitmq 
-        rabbitmq:3.13.7-management
+    - name: Deploy RabbitMQ to K3s
+      command: kubectl apply -f /opt/rabbitmq/rabbitmq-deployment.yml
+
+    - name: Wait for RabbitMQ deployment
+      command: kubectl rollout status deployment/rabbitmq -n default
+      register: rollout_status
+      until: rollout_status.rc == 0
+      retries: 30
+      delay: 10
 
     - name: Wait for RabbitMQ to be ready
       uri:
-        url: http://localhost:15672
+        url: http://localhost:31672
         status_code: 200
       register: result
       until: result.status == 200
@@ -46,6 +98,7 @@
       debug:
         msg: 
           - "RabbitMQ is running"
-          - "Management UI: http://localhost:15672"
+          - "Management UI: http://YOUR_SERVER_IP:31672"
+          - "AMQP Port: 30672"
           - "Username: admin"
           - "Password: admin123" 
