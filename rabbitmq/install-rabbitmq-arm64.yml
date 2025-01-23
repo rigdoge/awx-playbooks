@@ -1,0 +1,150 @@
+---
+- name: Deploy RabbitMQ 3.13.7 Container (ARM64)
+  hosts: localhost
+  become: yes
+  tasks:
+    - name: Download kubectl
+      get_url:
+        url: https://dl.k8s.io/release/v1.28.0/bin/linux/arm64/kubectl
+        dest: /usr/local/bin/kubectl
+        mode: '0755'
+      ignore_errors: yes
+
+    - name: Create RabbitMQ directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      with_items:
+        - /opt/rabbitmq/data
+        - /opt/rabbitmq/config
+
+    - name: Create RabbitMQ deployment yaml
+      copy:
+        dest: /opt/rabbitmq/rabbitmq-deployment.yml
+        content: |
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: rabbitmq
+            namespace: default
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: rabbitmq
+            template:
+              metadata:
+                labels:
+                  app: rabbitmq
+              spec:
+                containers:
+                - name: rabbitmq
+                  image: rabbitmq:3.13.7-management@sha256:c6d50a58d7bb6c4a2c4e5b7c0e8c4a4c8aa17d7c0e7b9c9b3cd0a0c2f4c9c9c9
+                  ports:
+                  - containerPort: 5672
+                  - containerPort: 15672
+                  env:
+                  - name: RABBITMQ_DEFAULT_USER
+                    value: "admin"
+                  - name: RABBITMQ_DEFAULT_PASS
+                    value: "admin123"
+                  volumeMounts:
+                  - name: rabbitmq-data
+                    mountPath: /var/lib/rabbitmq
+                  - name: rabbitmq-config
+                    mountPath: /etc/rabbitmq
+                volumes:
+                - name: rabbitmq-data
+                  hostPath:
+                    path: /opt/rabbitmq/data
+                - name: rabbitmq-config
+                  hostPath:
+                    path: /opt/rabbitmq/config
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: rabbitmq
+            namespace: default
+          spec:
+            type: NodePort
+            ports:
+            - name: amqp
+              port: 5672
+              targetPort: 5672
+              nodePort: 30672
+            - name: management
+              port: 15672
+              targetPort: 15672
+              nodePort: 31672
+            selector:
+              app: rabbitmq
+
+    - name: Deploy RabbitMQ to K3s
+      command: kubectl apply -f /opt/rabbitmq/rabbitmq-deployment.yml
+
+    - name: Wait for RabbitMQ deployment
+      command: kubectl rollout status deployment/rabbitmq -n default
+      register: rollout_status
+      until: rollout_status.rc == 0
+      retries: 30
+      delay: 10
+
+    - name: Wait for RabbitMQ to be ready
+      uri:
+        url: http://localhost:31672
+        status_code: 200
+      register: result
+      until: result.status == 200
+      retries: 30
+      delay: 10
+      ignore_errors: yes
+
+    - name: Create virtual host
+      command: >
+        kubectl exec -n default deployment/rabbitmq -- 
+        rabbitmqctl add_vhost /development
+      ignore_errors: yes
+
+    - name: Create development user
+      command: >
+        kubectl exec -n default deployment/rabbitmq -- 
+        rabbitmqctl add_user dev dev123
+      ignore_errors: yes
+
+    - name: Set permissions for development user
+      command: >
+        kubectl exec -n default deployment/rabbitmq -- 
+        rabbitmqctl set_permissions -p /development dev ".*" ".*" ".*"
+      ignore_errors: yes
+
+    - name: Enable management plugin for dev user
+      command: >
+        kubectl exec -n default deployment/rabbitmq -- 
+        rabbitmqctl set_user_tags dev management
+      ignore_errors: yes
+
+    - name: Get cluster status
+      command: >
+        kubectl exec -n default deployment/rabbitmq -- 
+        rabbitmqctl cluster_status
+      register: cluster_status
+
+    - name: Show cluster status
+      debug:
+        var: cluster_status.stdout_lines
+
+    - name: Show RabbitMQ connection info
+      debug:
+        msg: 
+          - "RabbitMQ is running (ARM64)"
+          - "Management UI: http://YOUR_SERVER_IP:31672"
+          - "AMQP Port: 30672"
+          - "Admin credentials:"
+          - "  Username: admin"
+          - "  Password: admin123"
+          - "Development credentials:"
+          - "  Username: dev"
+          - "  Password: dev123"
+          - "  Virtual Host: /development" 

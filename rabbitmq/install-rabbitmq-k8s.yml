@@ -1,0 +1,166 @@
+---
+- name: Deploy RabbitMQ on Kubernetes
+  hosts: localhost
+  become: yes
+  tasks:
+    - name: Create directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      with_items:
+        - /opt/rabbitmq/k8s/config
+        - /opt/rabbitmq/k8s/data
+
+    - name: Create namespace
+      k8s:
+        name: messaging
+        api_version: v1
+        kind: Namespace
+        state: present
+
+    - name: Create RabbitMQ config
+      copy:
+        dest: /opt/rabbitmq/k8s/config/rabbitmq.conf
+        content: |
+          default_user = admin
+          default_pass = admin123
+          management.tcp.port = 15672
+          management.tcp.ip = 0.0.0.0
+
+    - name: Create ConfigMap
+      k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: rabbitmq-config
+            namespace: messaging
+          data:
+            rabbitmq.conf: |
+              {{ lookup('file', '/opt/rabbitmq/k8s/config/rabbitmq.conf') }}
+
+    - name: Create RabbitMQ deployment
+      k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: rabbitmq
+            namespace: messaging
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: rabbitmq
+            template:
+              metadata:
+                labels:
+                  app: rabbitmq
+              spec:
+                containers:
+                - name: rabbitmq
+                  image: rabbitmq:3.13.0-management
+                  ports:
+                  - containerPort: 5672
+                    name: amqp
+                  - containerPort: 15672
+                    name: management
+                  volumeMounts:
+                  - name: rabbitmq-config
+                    mountPath: /etc/rabbitmq/
+                  - name: rabbitmq-data
+                    mountPath: /var/lib/rabbitmq
+                volumes:
+                - name: rabbitmq-config
+                  configMap:
+                    name: rabbitmq-config
+                - name: rabbitmq-data
+                  emptyDir: {}
+
+    - name: Create RabbitMQ service
+      k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: rabbitmq
+            namespace: messaging
+          spec:
+            type: NodePort
+            ports:
+            - port: 5672
+              targetPort: 5672
+              nodePort: 30672
+              name: amqp
+            - port: 15672
+              targetPort: 15672
+              nodePort: 31672
+              name: management
+            selector:
+              app: rabbitmq
+
+    - name: Wait for deployment
+      k8s_info:
+        kind: Deployment
+        name: rabbitmq
+        namespace: messaging
+        wait: yes
+        wait_timeout: 300
+
+    - name: Get pod status
+      k8s_info:
+        kind: Pod
+        namespace: messaging
+        label_selectors:
+          - app=rabbitmq
+      register: pod_status
+
+    - name: Show pod status
+      debug:
+        var: pod_status.resources
+
+    - name: Wait for RabbitMQ to be ready
+      pause:
+        seconds: 30
+
+    - name: Create development vhost
+      k8s_exec:
+        namespace: messaging
+        pod: "{{ pod_status.resources[0].metadata.name }}"
+        command: rabbitmqctl add_vhost /development
+
+    - name: Create development user
+      k8s_exec:
+        namespace: messaging
+        pod: "{{ pod_status.resources[0].metadata.name }}"
+        command: rabbitmqctl add_user dev dev123
+
+    - name: Set development user permissions
+      k8s_exec:
+        namespace: messaging
+        pod: "{{ pod_status.resources[0].metadata.name }}"
+        command: rabbitmqctl set_permissions -p /development dev ".*" ".*" ".*"
+
+    - name: Set development user tags
+      k8s_exec:
+        namespace: messaging
+        pod: "{{ pod_status.resources[0].metadata.name }}"
+        command: rabbitmqctl set_user_tags dev management
+
+    - name: Show connection info
+      debug:
+        msg:
+          - "RabbitMQ is running on Kubernetes"
+          - "Management UI: http://YOUR_SERVER_IP:31672"
+          - "AMQP port: 30672"
+          - "Admin credentials:"
+          - "  Username: admin"
+          - "  Password: admin123"
+          - "Development credentials:"
+          - "  Username: dev"
+          - "  Password: dev123"
+          - "  Vhost: /development" 

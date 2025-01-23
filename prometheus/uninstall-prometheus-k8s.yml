@@ -1,0 +1,72 @@
+---
+- name: Uninstall Prometheus Stack from Kubernetes
+  hosts: localhost
+  become: yes
+  tasks:
+    - name: Delete Services
+      k8s:
+        state: absent
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: "{{ item }}"
+            namespace: monitoring
+      with_items:
+        - prometheus
+        - alertmanager
+        - grafana
+
+    - name: Delete Deployments
+      k8s:
+        state: absent
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: "{{ item }}"
+            namespace: monitoring
+      with_items:
+        - prometheus
+        - alertmanager
+        - grafana
+
+    - name: Delete ConfigMaps
+      k8s:
+        state: absent
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: "{{ item }}"
+            namespace: monitoring
+      with_items:
+        - prometheus-config
+        - alertmanager-config
+
+    - name: Wait for resources to be removed
+      k8s_info:
+        kind: Pod
+        namespace: monitoring
+        label_selectors:
+          - app in (prometheus,alertmanager,grafana)
+      register: pod_status
+      until: pod_status.resources | length == 0
+      retries: 30
+      delay: 10
+
+    - name: Delete namespace
+      k8s:
+        name: monitoring
+        api_version: v1
+        kind: Namespace
+        state: absent
+
+    - name: Remove Prometheus directories
+      file:
+        path: /opt/prometheus/k8s
+        state: absent
+
+    - name: Show cleanup status
+      debug:
+        msg: "Prometheus Stack has been uninstalled from Kubernetes" 

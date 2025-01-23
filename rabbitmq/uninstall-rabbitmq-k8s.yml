@@ -1,0 +1,61 @@
+---
+- name: Uninstall RabbitMQ from Kubernetes
+  hosts: localhost
+  become: yes
+  tasks:
+    - name: Delete Service
+      k8s:
+        state: absent
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: rabbitmq
+            namespace: messaging
+
+    - name: Delete Deployment
+      k8s:
+        state: absent
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: rabbitmq
+            namespace: messaging
+
+    - name: Delete ConfigMap
+      k8s:
+        state: absent
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: rabbitmq-config
+            namespace: messaging
+
+    - name: Wait for resources to be removed
+      k8s_info:
+        kind: Pod
+        namespace: messaging
+        label_selectors:
+          - app=rabbitmq
+      register: pod_status
+      until: pod_status.resources | length == 0
+      retries: 30
+      delay: 10
+
+    - name: Delete namespace
+      k8s:
+        name: messaging
+        api_version: v1
+        kind: Namespace
+        state: absent
+
+    - name: Remove RabbitMQ directories
+      file:
+        path: /opt/rabbitmq/k8s
+        state: absent
+
+    - name: Show cleanup status
+      debug:
+        msg: "RabbitMQ has been uninstalled from Kubernetes" 

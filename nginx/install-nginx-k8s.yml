@@ -1,0 +1,168 @@
+---
+- name: Deploy Nginx on Kubernetes
+  hosts: localhost
+  become: yes
+  tasks:
+    - name: Create directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      with_items:
+        - /opt/nginx/k8s/conf
+        - /opt/nginx/k8s/html
+
+    - name: Create namespace
+      k8s:
+        name: web
+        api_version: v1
+        kind: Namespace
+        state: present
+
+    - name: Create default nginx config
+      copy:
+        dest: /opt/nginx/k8s/conf/default.conf
+        content: |
+          server {
+              listen       80;
+              server_name  localhost;
+
+              location / {
+                  root   /usr/share/nginx/html;
+                  index  index.html;
+              }
+
+              error_page   500 502 503 504  /50x.html;
+              location = /50x.html {
+                  root   /usr/share/nginx/html;
+              }
+          }
+
+    - name: Create test page
+      copy:
+        dest: /opt/nginx/k8s/html/index.html
+        content: |
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Welcome to Nginx on Kubernetes!</title>
+              <style>
+                  body {
+                      width: 35em;
+                      margin: 0 auto;
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+                  }
+              </style>
+          </head>
+          <body>
+              <h1>Welcome to Nginx on Kubernetes!</h1>
+              <p>If you see this page, the Nginx web server is successfully installed and working.</p>
+          </body>
+          </html>
+
+    - name: Create ConfigMap for nginx configuration
+      k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: nginx-config
+            namespace: web
+          data:
+            default.conf: |
+              {{ lookup('file', '/opt/nginx/k8s/conf/default.conf') }}
+
+    - name: Create ConfigMap for static content
+      k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: nginx-html
+            namespace: web
+          data:
+            index.html: |
+              {{ lookup('file', '/opt/nginx/k8s/html/index.html') }}
+
+    - name: Create Nginx deployment
+      k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: nginx
+            namespace: web
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: nginx
+            template:
+              metadata:
+                labels:
+                  app: nginx
+              spec:
+                containers:
+                - name: nginx
+                  image: nginx:1.24
+                  ports:
+                  - containerPort: 80
+                  volumeMounts:
+                  - name: nginx-config
+                    mountPath: /etc/nginx/conf.d
+                  - name: nginx-html
+                    mountPath: /usr/share/nginx/html
+                volumes:
+                - name: nginx-config
+                  configMap:
+                    name: nginx-config
+                - name: nginx-html
+                  configMap:
+                    name: nginx-html
+
+    - name: Create Nginx service
+      k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: nginx
+            namespace: web
+          spec:
+            type: NodePort
+            ports:
+            - port: 80
+              targetPort: 80
+              nodePort: 30080
+            selector:
+              app: nginx
+
+    - name: Wait for deployment
+      k8s_info:
+        kind: Deployment
+        name: nginx
+        namespace: web
+        wait: yes
+        wait_timeout: 300
+
+    - name: Get pod status
+      k8s_info:
+        kind: Pod
+        namespace: web
+        label_selectors:
+          - app=nginx
+      register: pod_status
+
+    - name: Show pod status
+      debug:
+        var: pod_status.resources
+
+    - name: Show connection info
+      debug:
+        msg:
+          - "Nginx is running on Kubernetes"
+          - "Access the web server at: http://YOUR_SERVER_IP:30080" 

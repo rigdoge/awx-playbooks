@@ -1,0 +1,158 @@
+---
+- name: Deploy Prometheus Stack with Docker
+  hosts: localhost
+  become: yes
+  tasks:
+    - name: Install Docker dependencies
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: deb [arch={{ ansible_architecture }}] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install Docker
+      apt:
+        name: docker-ce
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Create directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      with_items:
+        - /opt/prometheus/prometheus
+        - /opt/prometheus/alertmanager
+        - /opt/prometheus/grafana
+
+    - name: Create prometheus config
+      copy:
+        dest: /opt/prometheus/prometheus/prometheus.yml
+        content: |
+          global:
+            scrape_interval: 15s
+            evaluation_interval: 15s
+
+          alerting:
+            alertmanagers:
+            - static_configs:
+              - targets:
+                - alertmanager:9093
+
+          rule_files:
+            - /etc/prometheus/rules/*.yml
+
+          scrape_configs:
+            - job_name: 'prometheus'
+              static_configs:
+              - targets: ['localhost:9090']
+
+    - name: Create alertmanager config
+      copy:
+        dest: /opt/prometheus/alertmanager/alertmanager.yml
+        content: |
+          global:
+            resolve_timeout: 5m
+
+          route:
+            group_by: ['alertname']
+            group_wait: 10s
+            group_interval: 10s
+            repeat_interval: 1h
+            receiver: 'web.hook'
+          receivers:
+          - name: 'web.hook'
+            webhook_configs:
+            - url: 'http://127.0.0.1:5001/'
+
+    - name: Create Docker network
+      docker_network:
+        name: monitoring
+        state: present
+
+    - name: Start Prometheus container
+      docker_container:
+        name: prometheus
+        image: prom/prometheus:v2.45.0
+        state: started
+        restart_policy: always
+        network_mode: monitoring
+        ports:
+          - "9090:9090"
+        volumes:
+          - /opt/prometheus/prometheus:/etc/prometheus
+        command:
+          - --config.file=/etc/prometheus/prometheus.yml
+          - --storage.tsdb.path=/prometheus
+          - --web.console.libraries=/usr/share/prometheus/console_libraries
+          - --web.console.templates=/usr/share/prometheus/consoles
+
+    - name: Start Alertmanager container
+      docker_container:
+        name: alertmanager
+        image: prom/alertmanager:v0.26.0
+        state: started
+        restart_policy: always
+        network_mode: monitoring
+        ports:
+          - "9093:9093"
+        volumes:
+          - /opt/prometheus/alertmanager:/etc/alertmanager
+
+    - name: Start Grafana container
+      docker_container:
+        name: grafana
+        image: grafana/grafana:10.2.0
+        state: started
+        restart_policy: always
+        network_mode: monitoring
+        ports:
+          - "3000:3000"
+        volumes:
+          - /opt/prometheus/grafana:/var/lib/grafana
+        env:
+          GF_SECURITY_ADMIN_PASSWORD: "admin123"
+
+    - name: Wait for services to be ready
+      uri:
+        url: "http://localhost:{{ item.port }}"
+        status_code: 200
+      register: result
+      until: result.status == 200
+      retries: 30
+      delay: 10
+      ignore_errors: yes
+      with_items:
+        - { name: "Prometheus", port: "9090" }
+        - { name: "Alertmanager", port: "9093" }
+        - { name: "Grafana", port: "3000" }
+
+    - name: Show connection info
+      debug:
+        msg:
+          - "Prometheus Stack is running (Docker)"
+          - "Prometheus UI: http://YOUR_SERVER_IP:9090"
+          - "AlertManager UI: http://YOUR_SERVER_IP:9093"
+          - "Grafana UI: http://YOUR_SERVER_IP:3000"
+          - "Grafana credentials:"
+          - "  Username: admin"
+          - "  Password: admin123" 
