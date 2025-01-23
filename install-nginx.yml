@@ -1,0 +1,29 @@
+---
+- name: Install Nginx 1.24
+  hosts: all
+  become: yes
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install Nginx
+      package:
+        name: nginx
+        state: present
+      
+    - name: Start Nginx Service
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: Check Nginx Status
+      command: systemctl status nginx
+      register: nginx_status
+      changed_when: false
+
+    - name: Show Nginx Status
+      debug:
+        var: nginx_status.stdout_lines
