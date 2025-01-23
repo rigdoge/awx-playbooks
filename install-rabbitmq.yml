@@ -1,6 +1,6 @@
 ---
 - name: Deploy RabbitMQ 3.13.7 Container
-  hosts: all
+  hosts: localhost
   become: yes
   tasks:
     - name: Create RabbitMQ directories
