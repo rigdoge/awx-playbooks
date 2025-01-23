@@ -3,27 +3,27 @@
 echo "Installing development tools..."
 
 # 检查包管理器
-if command -v apt-get &> /dev/null; then
+if command -v brew &> /dev/null; then
+    echo "Using Homebrew..."
+    brew update
+    brew install python3 git pre-commit yamllint
+    brew install ansible-lint
+elif command -v apt-get &> /dev/null; then
+    echo "Using apt-get..."
     PKG_MANAGER="apt-get"
     sudo $PKG_MANAGER update
     sudo $PKG_MANAGER install -y python3-pip git
+    pip3 install --user ansible-lint yamllint pre-commit
 elif command -v yum &> /dev/null; then
+    echo "Using yum..."
     PKG_MANAGER="yum"
     sudo $PKG_MANAGER update
     sudo $PKG_MANAGER install -y python3-pip git
-elif command -v brew &> /dev/null; then
-    PKG_MANAGER="brew"
-    brew update
-    brew install python3 git
+    pip3 install --user ansible-lint yamllint pre-commit
 else
     echo "No supported package manager found"
     exit 1
 fi
-
-# 安装 Python 工具
-echo "Installing Python tools..."
-pip3 install --upgrade pip
-pip3 install ansible-lint yamllint pre-commit
 
 # 安装 pre-commit hooks
 echo "Setting up pre-commit hooks..."
